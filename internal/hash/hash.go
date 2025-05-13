@@ -1,5 +1,5 @@
 package hash
 
-func Hash(s string) string {
-	return s
+func Hash(s string) int {
+	return 5
 }
