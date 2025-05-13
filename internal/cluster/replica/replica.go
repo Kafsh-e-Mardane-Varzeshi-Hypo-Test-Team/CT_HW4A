@@ -4,17 +4,25 @@ type Replica struct {
 	// TODO
 }
 
-func (r *Replica) Set(key, value string) (ReplicaSetResp, error) {
+type ReplicaResp struct {
 	// TODO
-	return ReplicaSetResp{}, nil
+	// timestamp
+	// action: set, delete
+	// key
+	// value: -
 }
 
-func (r *Replica) Get(key string) (ReplicaGetResp, error) {
+func (r *Replica) Set(key, value string) (ReplicaResp, error) {
 	// TODO
-	return ReplicaGetResp{}, nil
+	return ReplicaResp{}, nil
 }
 
-func (r *Replica) Delete(key string) (ReplicaDeleteResp, error) {
+func (r *Replica) Get(key string) (ReplicaResp, error) {
 	// TODO
-	return ReplicaDeleteResp{}, nil
+	return ReplicaResp{}, nil
+}
+
+func (r *Replica) Delete(key string) (ReplicaResp, error) {
+	// TODO
+	return ReplicaResp{}, nil
 }
