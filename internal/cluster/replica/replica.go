@@ -127,6 +127,10 @@ func (r *Replica) Delete(key string) (ReplicaLog, error) {
 	return l, nil
 }
 
+func (r *Replica) GetLogsSince(timestamp int64) []ReplicaLog {
+	return r.GetLogs(timestamp, r.timestamp)
+}
+
 // GetLogs returns the logs between the given timestamps.
 // Start timestamp is inclusive and end timestamp is exclusive.
 func (r *Replica) GetLogs(timestampStart, timestampEnd int64) []ReplicaLog {
