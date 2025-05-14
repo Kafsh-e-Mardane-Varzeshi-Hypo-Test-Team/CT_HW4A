@@ -119,3 +119,57 @@ func (r *Replica) Delete(key string) (ReplicaLog, error) {
 
 	return log, nil
 }
+
+func (r *Replica) GetLogs(timestampStart, timestampEnd int64) []ReplicaLog {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// binary search for start1 index
+	start1 := 0
+	end1 := len(r.logs) - 1
+	for start1 <= end1 {
+		mid := (start1 + end1) / 2
+		if r.logs[mid].Timestamp < timestampStart {
+			start1 = mid + 1
+		} else {
+			end1 = mid - 1
+		}
+	}
+
+	// binary search for end index
+	start2 := 0
+	end2 := len(r.logs) - 1
+	for start2 <= end2 {
+		mid := (start2 + end2) / 2
+		if r.logs[mid].Timestamp <= timestampEnd {
+			start2 = mid + 1
+		} else {
+			end2 = mid - 1
+		}
+	}
+	// collect logs in the range
+	logs := r.logs[start1:start2]
+
+	return logs
+}
+
+func (l *ReplicaLog) String() string {
+	action := ""
+	switch l.Action {
+	case ReplicaActionSet:
+		action = "SET"
+	case ReplicaActionGet:
+		action = "GET"
+	case ReplicaActionDelete:
+		action = "DELETE"
+	}
+	return "ReplicaLog{" +
+		"PartitionId: " + strconv.FormatInt(int64(l.PartitionId), 10) +
+		", NodeId: " + strconv.FormatInt(int64(l.NodeId), 10) +
+		", ReplicaId: " + strconv.FormatInt(int64(l.ReplicaId), 10) +
+		", Action: " + action +
+		", Timestamp: " + strconv.FormatInt(l.Timestamp, 10) +
+		", Key: " + l.Key +
+		", Value: " + l.Value +
+		"}"
+}
