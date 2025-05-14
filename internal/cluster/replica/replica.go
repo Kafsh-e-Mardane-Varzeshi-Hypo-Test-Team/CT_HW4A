@@ -2,6 +2,8 @@ package replica
 
 import (
 	"errors"
+	"log"
+	"strconv"
 	"sync"
 )
 
@@ -53,7 +55,7 @@ func (r *Replica) Set(key, value string) (ReplicaLog, error) {
 
 	r.data[key] = value
 
-	log := ReplicaLog{
+	l := ReplicaLog{
 		PartitionId: r.PartitionId,
 		NodeId:      r.NodeId,
 		ReplicaId:   r.Id,
@@ -63,11 +65,12 @@ func (r *Replica) Set(key, value string) (ReplicaLog, error) {
 		Value:       value,
 	}
 
-	r.logs = append(r.logs, log)
+	r.logs = append(r.logs, l)
 
 	r.timestamp++
 
-	return log, nil
+	log.Println("key \"" + key + "\" set to \"" + value + "\"")
+	return l, nil
 }
 
 func (r *Replica) Get(key string) (ReplicaLog, error) {
@@ -76,10 +79,11 @@ func (r *Replica) Get(key string) (ReplicaLog, error) {
 
 	value, exists := r.data[key]
 	if !exists {
-		return ReplicaLog{}, errors.New("key not found")
+		log.Println("key \"" + key + "\" not found")
+		return ReplicaLog{}, errors.New("key \"" + key + "\" not found")
 	}
 
-	log := ReplicaLog{
+	l := ReplicaLog{
 		PartitionId: r.PartitionId,
 		NodeId:      r.NodeId,
 		ReplicaId:   r.Id,
@@ -89,7 +93,8 @@ func (r *Replica) Get(key string) (ReplicaLog, error) {
 		Value:       value,
 	}
 
-	return log, nil
+	log.Println("key \"" + key + "\" found with value \"" + value + "\"")
+	return l, nil
 }
 
 func (r *Replica) Delete(key string) (ReplicaLog, error) {
@@ -98,12 +103,13 @@ func (r *Replica) Delete(key string) (ReplicaLog, error) {
 
 	value, exists := r.data[key]
 	if !exists {
-		return ReplicaLog{}, errors.New("key not found")
+		log.Println("key \"" + key + "\" not found")
+		return ReplicaLog{}, errors.New("key \"" + key + "\" not found")
 	}
 
 	delete(r.data, key)
 
-	log := ReplicaLog{
+	l := ReplicaLog{
 		PartitionId: r.PartitionId,
 		NodeId:      r.NodeId,
 		ReplicaId:   r.Id,
@@ -113,11 +119,12 @@ func (r *Replica) Delete(key string) (ReplicaLog, error) {
 		Value:       value,
 	}
 
-	r.logs = append(r.logs, log)
+	r.logs = append(r.logs, l)
 
 	r.timestamp++
 
-	return log, nil
+	log.Println("key \"" + key + "\" deleted with value \"" + value + "\"")
+	return l, nil
 }
 
 func (r *Replica) GetLogs(timestampStart, timestampEnd int64) []ReplicaLog {
