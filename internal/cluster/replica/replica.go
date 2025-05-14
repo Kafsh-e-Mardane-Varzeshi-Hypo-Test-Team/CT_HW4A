@@ -127,6 +127,8 @@ func (r *Replica) Delete(key string) (ReplicaLog, error) {
 	return l, nil
 }
 
+// GetLogs returns the logs between the given timestamps.
+// Start timestamp is inclusive and end timestamp is exclusive.
 func (r *Replica) GetLogs(timestampStart, timestampEnd int64) []ReplicaLog {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -143,20 +145,27 @@ func (r *Replica) GetLogs(timestampStart, timestampEnd int64) []ReplicaLog {
 		}
 	}
 
-	// binary search for end index
+	// binary search for end index (exclusive)
 	start2 := 0
 	end2 := len(r.logs) - 1
 	for start2 <= end2 {
 		mid := (start2 + end2) / 2
-		if r.logs[mid].Timestamp <= timestampEnd {
+		if r.logs[mid].Timestamp < timestampEnd {
 			start2 = mid + 1
 		} else {
 			end2 = mid - 1
 		}
 	}
-	// collect logs in the range
+
+	// start2 is now the first index where the timestamp is greater than or equal to timestampEnd
+	if start1 >= len(r.logs) || start2 <= start1 {
+		log.Println("no logs found between timestamps " + strconv.FormatInt(timestampStart, 10) + " and " + strconv.FormatInt(timestampEnd, 10))
+		return []ReplicaLog{}
+	}
+
 	logs := r.logs[start1:start2]
 
+	log.Println("returned " + strconv.Itoa(len(logs)) + " logs from timestamp " + strconv.FormatInt(timestampStart, 10) + " before " + strconv.FormatInt(timestampEnd, 10))
 	return logs
 }
 
