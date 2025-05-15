@@ -207,3 +207,15 @@ func (r *FollowerReplica) GetLogs(timestampStart, timestampEnd int64) []ReplicaL
 	log.Println("returned " + strconv.Itoa(len(logs)) + " logs from timestamp " + strconv.FormatInt(timestampStart, 10) + " before " + strconv.FormatInt(timestampEnd, 10))
 	return logs
 }
+
+// TODO: requests must be blocked until the leader replica is ready, then send the request to the leader replica
+func (r *FollowerReplica) ConvertToLeader() *LeaderReplica {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	leader := NewLeaderReplica(r.Id, r.NodeId, r.PartitionId)
+	leader.data = r.data
+	leader.logs = r.logs
+	leader.timestamp = r.logs[len(r.logs)-1].Timestamp
+	return leader
+}

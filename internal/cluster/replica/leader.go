@@ -16,7 +16,7 @@ type LeaderReplica struct {
 	mu          sync.RWMutex
 }
 
-func NewMasterReplica(id, nodeId, partitionId int) *LeaderReplica {
+func NewLeaderReplica(id, nodeId, partitionId int) *LeaderReplica {
 	return &LeaderReplica{
 		Id:          id,
 		NodeId:      nodeId,
@@ -186,4 +186,17 @@ func (r *LeaderReplica) GetLogs(timestampStart, timestampEnd int64) []ReplicaLog
 
 	log.Println("returned " + strconv.Itoa(len(logs)) + " logs from timestamp " + strconv.FormatInt(timestampStart, 10) + " before " + strconv.FormatInt(timestampEnd, 10))
 	return logs
+}
+
+// TODO: requests must be blocked until the follower replica is ready, then send the request to the follower replica
+
+func (r *LeaderReplica) ConvertToFollower() *FollowerReplica {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	follower := NewFollowerReplica(r.Id, r.NodeId, r.PartitionId)
+	follower.data = r.data
+	follower.logs = r.logs
+
+	return follower
 }
