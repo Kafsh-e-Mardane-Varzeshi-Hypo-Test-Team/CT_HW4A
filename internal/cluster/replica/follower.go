@@ -138,6 +138,32 @@ func (r *FollowerReplica) Delete(key string, timestamp int64) (ReplicaLog, error
 	return l, nil
 }
 
+// DropLogsBefore keeps the logs strictly before the given timestamp.
+func (r *FollowerReplica) DropLogsBefore(timestamp int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// binary search for start index
+	start := 0
+	end := len(r.logs) - 1
+	for start <= end {
+		mid := (start + end) / 2
+		if r.logs[mid].Timestamp < timestamp {
+			start = mid + 1
+		} else {
+			end = mid - 1
+		}
+	}
+
+	if start >= len(r.logs) {
+		log.Println("no logs found since timestamp " + strconv.FormatInt(timestamp, 10))
+		return
+	}
+
+	r.logs = r.logs[start:]
+	log.Println("kept " + strconv.Itoa(len(r.logs)) + " logs since timestamp " + strconv.FormatInt(timestamp, 10))
+}
+
 func (r *FollowerReplica) GetLogsSince(timestamp int64) []ReplicaLog {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
