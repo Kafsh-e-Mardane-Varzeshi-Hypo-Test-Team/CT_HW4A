@@ -62,13 +62,13 @@ func (r *FollowerReplica) Set(key, value string, timestamp int64) (ReplicaLog, e
 
 	r.logs = append(r.logs, l)
 
-	log.Println("key \"" + key + "\" set to \"" + value + "\"")
+	log.Println("FollowerSetKey: " + l.String())
 	return l, nil
 }
 
 // Get retrieves the value for the given key.
 // If the key does not exist, it returns an error.
-// timestamp is returned as the timestamp of the log entry.
+// -1 is used as a placeholder for the timestamp in the log entry.
 func (r *FollowerReplica) Get(key string) (ReplicaLog, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -87,12 +87,12 @@ func (r *FollowerReplica) Get(key string) (ReplicaLog, error) {
 		NodeId:      r.NodeId,
 		ReplicaId:   r.Id,
 		Action:      ReplicaActionGet,
-		Timestamp:   data.Timestamp,
+		Timestamp:   -1,
 		Key:         key,
 		Value:       data.Value,
 	}
 
-	log.Println("key \"" + key + "\" found with value \"" + data.Value + "\" set at timestamp " + strconv.FormatInt(data.Timestamp, 10))
+	log.Println("FollowerGetKey: " + l.String())
 	return l, nil
 }
 
@@ -134,7 +134,7 @@ func (r *FollowerReplica) Delete(key string, timestamp int64) (ReplicaLog, error
 
 	r.logs = append(r.logs, l)
 
-	log.Println("key \"" + key + "\" deleted with value \"" + data.Value + "\" at timestamp " + strconv.FormatInt(timestamp, 10))
+	log.Println("FollowerDeleteKey: " + l.String())
 	return l, nil
 }
 
