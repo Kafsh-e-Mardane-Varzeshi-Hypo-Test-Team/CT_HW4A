@@ -20,6 +20,7 @@ type Node struct {
 }
 
 func NewNode(id int) Node {
+	// TODO(discuss): talk with Mohammad about this part. should i run start() function?
 	return Node{
 		Id:       id,
 		replicas: make(map[int]*replica.LeaderReplica),
