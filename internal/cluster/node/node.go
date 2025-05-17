@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/hash"
 )
 
 type Node struct {
@@ -24,29 +26,70 @@ func NewNode(id int) Node {
 	}
 }
 
-func (n *Node) SetInLeaderReplica(partiotionId int, key, value string) error {
+func (n *Node) HandleSetFromLB(w http.ResponseWriter, r *http.Request) {
+	// TODO(discuss): about these http methods
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		log.Printf("[node.HandleSetFromLB] Invalid method: %s from %s", r.Method, r.RemoteAddr)
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("[node.HandleSetFromLB] Failed to read body from %s: %v", r.RemoteAddr, err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	var req SetRequestFromLB
+	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("[node.HandleSetFromLB] Invalid JSON payload from %s: %v | Body: %s", r.RemoteAddr, err, string(body))
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if req.Key == "" {
+		log.Printf("[node.HandleSetFromLB] Empty key from %s | Payload: %+v", r.RemoteAddr, req)
+		http.Error(w, "Key cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	partitionID := hash.HashKey(req.Key) // Assume this function exists
+	err = n.setInLeaderReplica(partitionID, req.Key, req.Value)
+	if err != nil {
+		log.Printf("[node.HandleSetFromLB] failed to set key '%s' in partition %d: %v", req.Key, partitionID, err)
+		http.Error(w, fmt.Sprintf("Failed to set key: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// TODO(discuss): discuss about this response with Mohammad
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+func (n *Node) setInLeaderReplica(partiotionId int, key, value string) error {
 	// find the replica that has to store this key
 	replica, ok := n.replicas[partiotionId]
 	if !ok {
-		return fmt.Errorf("node id: %v contains no partition containing key:%s", n.Id, key)
+		return fmt.Errorf("[node.setInLeaderReplica] node id: %v contains no partition containing key:%s", n.Id, key)
 	}
 
-	// if we have only one replica struct (not leader and follower):
+	// TODO(discuss): if we have only one replica struct (not leader and follower):
 	// if !partition.IsLeader {
 	//    return fmt.Errorf("node id: %v contains no leader for partition %v", n.Id, partitionID)
 	// }
 
-	// TODO: append to WAL
+	// TODO(me): append to WAL
 
-	// set key, value
 	replicaLog, err := replica.Set(key, value)
 	if err != nil {
-		return fmt.Errorf("failed to set(key, value) to partitionId: %v in nodeId: %v, err: %v", partiotionId, n.Id, err)
+		return fmt.Errorf("[node.setInLeaderReplica] failed to set(key, value) to partitionId: %v in nodeId: %v | err: %v", partiotionId, n.Id, err)
 	}
 
 	err = n.broadcastToFollowers(replicaLog)
 	if err != nil {
-		return fmt.Errorf("failed to broadcast set request to followes in nodeId: %v, err: %v", n.Id, err)
+		// TODO(discuss): ask if this should be error or log
+		return fmt.Errorf("[node.setInLeaderReplica] failed to broadcast set request to followes in nodeId: %v | err: %v", n.Id, err)
 	}
 
 	return nil
@@ -83,38 +126,38 @@ func heartbeat() {
 
 func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) error {
 	followersNodes := controller.GetNodesContainingPartition(replicaLog.PartitionId)
-    reqBody := RequestToFollowerNodes{replicaLog}
+	reqBody := RequestToFollowerNodes{replicaLog}
 
-    bodyBytes, err := json.Marshal(reqBody)
-    if err != nil {
-		return fmt.Errorf("failed to marshal RequestToFollowerNodes: %v", err)
-    }
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("[node.broadcastToFollowers] failed to marshal RequestToFollowerNodes: %v", err)
+	}
 
 	for _, fn := range followersNodes {
-        go func(fn *controller.NodeMetadata) {
-            maxRetries := 3
-            for i := 0; i < maxRetries; i++ {
-				// TODO: fix address
-                url := fmt.Sprintf("http://%s/set/follower-node", fn.Address)
+		go func(fn *controller.NodeMetadata) {
+			maxRetries := 3
+			for i := 0; i < maxRetries; i++ {
+				// TODO(discuss): set this address
+				url := fmt.Sprintf("http://%s/set/follower-node", fn.Address)
 
-                resp, err := http.Post(url, "application/json", bytes.NewReader(bodyBytes))
-                if err == nil && resp.StatusCode == http.StatusOK {
-                    log.Printf("Broadcast Successfully replicated to follower node %s", fn.Address)
-                    resp.Body.Close()
-                    return
-                }
+				resp, err := http.Post(url, "application/json", bytes.NewReader(bodyBytes))
+				if err == nil && resp.StatusCode == http.StatusOK {
+					log.Printf("[node.broadcastToFollowers] Successfully replicated to follower node %s", fn.Address)
+					resp.Body.Close()
+					return
+				}
 
-                if resp != nil {
-                    resp.Body.Close()
-                }
+				if resp != nil {
+					resp.Body.Close()
+				}
 
-                log.Printf("Broadcast Failed to replicate to follower node %s (attempt %d): %v", fn.Address, i+1, err)
-                time.Sleep(1 * time.Second) // TODO: fix this
-            }
+				log.Printf("[node.broadcastToFollowers] Failed to replicate to follower node %s (attempt %d): %v", fn.Address, i+1, err)
+				time.Sleep(1 * time.Second) // TODO(discuss): how many seconds we should wait for response? test it.
+			}
 
-            log.Printf("Broadcast Giving up on follower node %s after %d retries", fn.Address, maxRetries)
-        }(fn)
-    }
+			log.Printf("[node.broadcastToFollowers] Giving up on follower node %s after %d retries", fn.Address, maxRetries)
+		}(fn)
+	}
 
 	return nil
 }

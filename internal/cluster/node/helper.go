@@ -2,7 +2,12 @@ package node
 
 import "github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 
-// TODO: i guess it's not clean!
+// TODO(discuss): i guess it's not clean!
 type RequestToFollowerNodes struct {
 	replica.ReplicaLog
+}
+
+type SetRequestFromLB struct {
+	Key string
+	Value string
 }
