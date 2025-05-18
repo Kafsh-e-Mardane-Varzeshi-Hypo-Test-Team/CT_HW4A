@@ -14,6 +14,7 @@ import (
 
 const (
 	CONTROLLER_ADDRESS = "8000"
+	HEARTBEAT_TIMER    = 2 * time.Second
 )
 
 type Node struct {
@@ -34,7 +35,7 @@ func (n *Node) Start() error {
 	if err != nil {
 		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
 	}
-	go n.heartbeat()
+	go n.startHeartbeat(HEARTBEAT_TIMER)
 
 	n.replicasInitialization()
 	go n.tcpListener("lb-requests-to-node"+strconv.Itoa(n.Id), n.lbConnectionHandler)           // TODO: read about this address
@@ -230,7 +231,7 @@ func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
 		encoder := gob.NewEncoder(conn)
 		decoder := gob.NewDecoder(conn)
 
-		if err := encoder.Encode("ReplicateToFollower"); err != nil {
+		if err := encoder.Encode("Request-From-Node-Of-Leader-Partition"); err != nil {
 			log.Printf("[node.replicateToFollower] failed to send request type: %v", err)
 			conn.Close()
 			time.Sleep(retryDelay)
@@ -277,7 +278,7 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]controller.NodeMe
 	encoder := gob.NewEncoder(conn)
 	decoder := gob.NewDecoder(conn)
 
-	if err := encoder.Encode("GetNodesContainingPartition"); err != nil {
+	if err := encoder.Encode("Get-Nodes-Containing-Partition"); err != nil {
 		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to encode request type: %v", err)
 	}
 
@@ -298,6 +299,38 @@ func (n *Node) loadConfig() error {
 	return nil
 }
 
-func (n *Node) heartbeat() {
-	// TODO
+func (n *Node) startHeartbeat(interval time.Duration) {
+	go func() {
+		for {
+			err := n.sendHeartbeat()
+			if err != nil {
+				log.Printf("[node.startHeartbeat] failed to send heartbeat: %v", err)
+			}
+			time.Sleep(interval)
+		}
+	}()
+}
+
+func (n *Node) sendHeartbeat() error {
+	conn, err := net.Dial("tcp", CONTROLLER_ADDRESS)
+	if err != nil {
+		return fmt.Errorf("failed to connect to controller at %s: %v", CONTROLLER_ADDRESS, err)
+	}
+	defer conn.Close()
+
+	encoder := gob.NewEncoder(conn)
+
+	if err := encoder.Encode("Heartbeat-From-Node"); err != nil {
+		return fmt.Errorf("failed to encode heartbeat message type: %v", err)
+	}
+
+	hb := Heartbeat{
+		NodeId:    n.Id,
+		Timestamp: time.Now().Unix(),
+	}
+	if err := encoder.Encode(hb); err != nil {
+		return fmt.Errorf("failed to encode heartbeat payload: %v", err)
+	}
+
+	return nil
 }
