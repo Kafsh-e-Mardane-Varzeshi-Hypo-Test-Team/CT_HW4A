@@ -12,6 +12,9 @@ import (
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 )
 
+const (
+	CONTROLLER_ADDRESS = "8000"
+)
 type Node struct {
 	Id       int
 	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
@@ -33,7 +36,7 @@ func (n *Node) Start() error {
 	go n.heartbeat()
 
 	n.replicasInitialization()
-	go n.tcpListener("lb-requests-to-node"+strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
+	go n.tcpListener("lb-requests-to-node"+strconv.Itoa(n.Id), n.lbConnectionHandler)           // TODO: read about this address
 	go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.nodeConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
@@ -213,54 +216,54 @@ func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
 }
 
 func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
-    maxRetries := 3
+	maxRetries := 3
 	retryDelay := 100 * time.Millisecond
-    for i := 0; i < maxRetries; i++ {
-        conn, err := net.Dial("tcp", ":"+fn.Address)
-        if err != nil {
-            log.Printf("[node.replicateToFollower] failed to connect to %s: %v", fn.Address, err)
-            time.Sleep(retryDelay)
-            continue
-        }
+	for i := 0; i < maxRetries; i++ {
+		conn, err := net.Dial("tcp", ":"+fn.Address)
+		if err != nil {
+			log.Printf("[node.replicateToFollower] failed to connect to %s: %v", fn.Address, err)
+			time.Sleep(retryDelay)
+			continue
+		}
 
-        encoder := gob.NewEncoder(conn)
-        decoder := gob.NewDecoder(conn)
+		encoder := gob.NewEncoder(conn)
+		decoder := gob.NewDecoder(conn)
 
-        if err := encoder.Encode("ReplicaSet"); err != nil {
-            log.Printf("[node.replicateToFollower] failed to send request type: %v", err)
-            conn.Close()
-            time.Sleep(retryDelay)
-            continue
-        }
+		if err := encoder.Encode("ReplicateToFollower"); err != nil {
+			log.Printf("[node.replicateToFollower] failed to send request type: %v", err)
+			conn.Close()
+			time.Sleep(retryDelay)
+			continue
+		}
 
-        if err := encoder.Encode(msg); err != nil {
-            log.Printf("[node.replicateToFollower] failed to send message: %v", err)
-            conn.Close()
-            time.Sleep(retryDelay)
-            continue
-        }
+		if err := encoder.Encode(msg); err != nil {
+			log.Printf("[node.replicateToFollower] failed to send message: %v", err)
+			conn.Close()
+			time.Sleep(retryDelay)
+			continue
+		}
 
-        var resp Response
-        if err := decoder.Decode(&resp); err != nil {
-            log.Printf("[node.replicateToFollower] failed to decode response: %v", err)
-            conn.Close()
-            time.Sleep(retryDelay)
-            continue
-        }
+		var resp Response
+		if err := decoder.Decode(&resp); err != nil {
+			log.Printf("[node.replicateToFollower] failed to decode response: %v", err)
+			conn.Close()
+			time.Sleep(retryDelay)
+			continue
+		}
 
-        conn.Close()
+		conn.Close()
 
-        if resp.Error != nil {
-            log.Printf("[node.replicateToFollower] follower at %s responded with error: %s", fn.Address, resp.Error)
-            time.Sleep(retryDelay)
-            continue
-        }
+		if resp.Error != nil {
+			log.Printf("[node.replicateToFollower] follower at %s responded with error: %s", fn.Address, resp.Error)
+			time.Sleep(retryDelay)
+			continue
+		}
 
-        log.Printf("[node.replicateToFollower] successfully replicated to %s", fn.Address)
-        return
-    }
+		log.Printf("[node.replicateToFollower] successfully replicated to %s", fn.Address)
+		return
+	}
 
-    log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", fn.Address, maxRetries)
+	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", fn.Address, maxRetries)
 }
 
 func (n *Node) getNodesContainingPartition(partitionId int) ([]controller.NodeMetadata, error) {
