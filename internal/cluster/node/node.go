@@ -6,7 +6,9 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"time"
 
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 )
 
@@ -175,40 +177,84 @@ func (n *Node) delete(partitionId int, timestamp int64, key string, replicaType 
 
 // This function broadcase set/delete requests to all follower replicas
 func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
-	// followersNodes := controller.GetNodesContainingPartition(replicaLog.PartitionId)
-	// reqBody := RequestToFollowerNodes{replicaLog}
+	msg := Message{
+		PartitionId: replicaLog.PartitionId,
+		Timestamp:   replicaLog.Timestamp,
+		Key:         replicaLog.Key,
+		Value:       replicaLog.Value,
+	}
 
-	// bodyBytes, err := json.Marshal(reqBody)
-	// if err != nil {
-	// 	log.Printf("[node.broadcastToFollowers] failed to marshal RequestToFollowerNodes: %v", err)
-	// 	return
-	// }
+	if replicaLog.Action == replica.ReplicaActionSet {
+		msg.Type = Set
+	} else if replicaLog.Action == replica.ReplicaActionDelete {
+		msg.Type = Delete
+	}
 
-	// for _, fn := range followersNodes {
-	// 	go func(fn *controller.NodeMetadata) {
-	// 		maxRetries := 3
-	// 		for i := 0; i < maxRetries; i++ {
-	// 			// TODO(discuss): set this address
-	// 			url := fmt.Sprintf("http://%s/set/follower-node", fn.Address)
+	followersNodes, err := n.getNodesContainingPartition(replicaLog.PartitionId)
+	if err != nil {
+		log.Printf("[node.broadcastToFollowers] failed get nodes containing partitionId: %d from controller: %v", replicaLog.PartitionId, err)
+	}
 
-	// 			resp, err := http.Post(url, "application/json", bytes.NewReader(bodyBytes))
-	// 			if err == nil && resp.StatusCode == http.StatusOK {
-	// 				log.Printf("[node.broadcastToFollowers] Successfully replicated to follower node %s", fn.Address)
-	// 				resp.Body.Close()
-	// 				return
-	// 			}
+	for _, fn := range followersNodes {
+		// TODO(discuss): ask mohammad when would I need IsAlive and ID?
+		go n.replicateToFollower(fn, msg)
+	}
+}
 
-	// 			if resp != nil {
-	// 				resp.Body.Close()
-	// 			}
+func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
+    maxRetries := 3
+	retryDelay := 100 * time.Millisecond
+    for i := 0; i < maxRetries; i++ {
+        conn, err := net.Dial("tcp", ":"+fn.Address)
+        if err != nil {
+            log.Printf("[node.replicateToFollower] failed to connect to %s: %v", fn.Address, err)
+            time.Sleep(retryDelay)
+            continue
+        }
 
-	// 			log.Printf("[node.broadcastToFollowers] Failed to replicate to follower node %s (attempt %d): %v", fn.Address, i+1, err)
-	// 			time.Sleep(1 * time.Second) // TODO(discuss): how many seconds we should wait for response? test it.
-	// 		}
+        encoder := gob.NewEncoder(conn)
+        decoder := gob.NewDecoder(conn)
 
-	// 		log.Printf("[node.broadcastToFollowers] Giving up on follower node %s after %d retries", fn.Address, maxRetries)
-	// 	}(fn)
-	// }
+        if err := encoder.Encode("ReplicaSet"); err != nil {
+            log.Printf("[node.replicateToFollower] failed to send request type: %v", err)
+            conn.Close()
+            time.Sleep(retryDelay)
+            continue
+        }
+
+        if err := encoder.Encode(msg); err != nil {
+            log.Printf("[node.replicateToFollower] failed to send message: %v", err)
+            conn.Close()
+            time.Sleep(retryDelay)
+            continue
+        }
+
+        var resp Response
+        if err := decoder.Decode(&resp); err != nil {
+            log.Printf("[node.replicateToFollower] failed to decode response: %v", err)
+            conn.Close()
+            time.Sleep(retryDelay)
+            continue
+        }
+
+        conn.Close()
+
+        if resp.Error != nil {
+            log.Printf("[node.replicateToFollower] follower at %s responded with error: %s", fn.Address, resp.Error)
+            time.Sleep(retryDelay)
+            continue
+        }
+
+        log.Printf("[node.replicateToFollower] successfully replicated to %s", fn.Address)
+        return
+    }
+
+    log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", fn.Address, maxRetries)
+}
+
+func (n *Node) getNodesContainingPartition(partitionId int) ([]controller.NodeMetadata, error) {
+	// TODO
+	return make([]controller.NodeMetadata, 0), nil
 }
 
 func (n *Node) loadConfig() error {
