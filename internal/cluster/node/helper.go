@@ -1,16 +1,31 @@
 package node
 
 import (
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
+	"encoding/gob"
 )
 
-// TODO(discuss): i guess it's not clean!
-type RequestToFollowerNodes struct {
-	replica.ReplicaLog
+func init() {
+	gob.Register(Message{})
+	gob.Register(Response{})
 }
 
-type SetRequest struct {
-	timestamp int64
-	Key string
+type MessageType string
+
+const (
+	Set    MessageType = "SET"
+	Get    MessageType = "GET"
+	Delete MessageType = "DELETE"
+)
+
+type Message struct {
+	Type        MessageType
+	PartitionId int
+	Timestamp   int64
+	Key         string
+	Value       string
+}
+
+type Response struct {
+	Error error
 	Value string
 }

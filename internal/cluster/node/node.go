@@ -1,13 +1,13 @@
 package node
 
 import (
+	"encoding/gob"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/hash"
 )
 
 type Node struct {
@@ -23,79 +23,27 @@ func NewNode(id int) Node {
 	// TODO: run node.start node in main.go file of container
 }
 
-func (n *Node) HandleSetFromLB() {
-	// TODO: get req from lb using some connection protocol
-	req := SetRequest{
-		Key:   "something",
-		Value: "something else",
-	}
-
-	partitionId := hash.HashKey(req.Key)
-	err := n.setInLeader(partitionId, req.Key, req.Value)
-	if err != nil {
-		log.Printf("[node.HandleSetFromLB] failed to set key '%s' in partition %d: %v", req.Key, partitionId, err)
-		// TODO: nok resp to lb
-		return
-	}
-
-	// TODO: ok resp to lb
-}
-
-func (n *Node) HandleSetFromSomeNode() {
-	// TODO: get req from some node using some connection protocol
-	req := SetRequest{
-		timestamp: 1,
-		Key:       "something",
-		Value:     "something else",
-	}
-
-	partitionId := hash.HashKey(req.Key)
-	err := n.setInFollower(partitionId, req.timestamp, req.Key, req.Value)
-	if err != nil {
-		log.Printf("[node.HandleSetFromSomeNode] failed to set key '%s' in partition %d: %v", req.Key, partitionId, err)
-	}
-}
-
-func (n *Node) setInLeader(partitionId int, key, value string) error {
+func (n *Node) set(partitionId int, timestamp int64, key string, value string, replicaType replica.ReplicaType) error {
 	// find the replica that has to store this key
 	r, ok := n.replicas[partitionId]
 	if !ok {
 		return fmt.Errorf("[node.setInLeader] node id: %v contains no partition containing key:%s", n.Id, key)
 	}
 
-	if r.Mode == replica.Follower {
-		return fmt.Errorf("[node.setInLeader] node id: %v contains no leader for partition %v", n.Id, partitionId)
+	if r.Mode != replicaType {
+		return fmt.Errorf("[node.setInLeader] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
 	}
 
 	// TODO(me): append to WAL
-
-	replicaLog, err := r.Set(key, value, -1)
+	
+	replicaLog, err := r.Set(key, value, timestamp)
 	if err != nil {
 		return fmt.Errorf("[node.setInLeader] failed to set(key, value) to partitionId: %v in nodeId: %v | err: %v", partitionId, n.Id, err)
 	}
 
-	go n.broadcastToFollowers(replicaLog)
-	return nil
-}
-
-func (n *Node) setInFollower(partitionId int, timestamp int64, key string, value string) error {
-	// find the replica that has to store this key
-	r, ok := n.replicas[partitionId]
-	if !ok {
-		return fmt.Errorf("[node.setInFollower] node id: %v contains no partition containing key:%s", n.Id, key)
+	if replicaType == replica.Leader {
+		go n.broadcastToFollowers(replicaLog)
 	}
-
-	if r.Mode == replica.Leader {
-		return fmt.Errorf("[node.setInFollower] node id: %v contains no follower for partition %v", n.Id, partitionId)
-	}
-
-	// TODO(me): append to WAL
-
-	_, err := r.Set(key, value, timestamp)
-	if err != nil {
-		return fmt.Errorf("[node.setInFollower] failed to set(key, value) to partitionId: %v in nodeId: %v | err: %v", partitionId, n.Id, err)
-	}
-
 	return nil
 }
 
@@ -117,7 +65,7 @@ func (n *Node) Start() error {
 	go n.heartbeat()
 	
 	n.replicasInitialization()
-	go n.tcpListener("lb-node-" + strconv.Itoa(n.Id), n.lbHandler)
+	go n.tcpListener("TODO" + strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
 }
@@ -127,7 +75,7 @@ func (n *Node) loadConfig() error {
 	return nil
 }
 
-func (n *Node) tcpListener(address string, handler func(net.Conn)) {
+func (n *Node) tcpListener(address string, handler func(Message) Response) {
 	ln, err := net.Listen("tcp", ":"+address)
 	if err != nil {
 		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", address, err)
@@ -141,12 +89,43 @@ func (n *Node) tcpListener(address string, handler func(net.Conn)) {
 			log.Printf("[node.tcpListener] Connection accept error: %v", err)
 			continue
 		}
-		go handler(conn)
+		go func(conn net.Conn) {
+			defer conn.Close()
+			decoder := gob.NewDecoder(conn)
+			encoder := gob.NewEncoder(conn)
+
+			var msg Message
+			if err := decoder.Decode(&msg); err != nil {
+				log.Printf("[node.tcpListener] Failed to decode message: %v", err)
+				return
+			}
+
+			resp := handler(msg)
+			if err := encoder.Encode(resp); err != nil {
+				log.Printf("[node.tcpListener] Failed to send response: %v", err)
+			}
+		}(conn)
 	}
 }
 
-func (n *Node) lbHandler(conn net.Conn) {
-	// TODO
+func (n *Node) lbConnectionHandler(msg Message) Response {
+	switch msg.Type {
+		case Set:
+			err := n.set(msg.PartitionId, msg.Timestamp, msg.Key, msg.Value, replica.Leader)
+			if err != nil {
+				log.Printf("[node.lbConnectionHandler] failed to set key '%s' in partition %d: %v", msg.Key, msg.PartitionId, err)
+				return Response{Error: err}
+			}
+			return Response{}
+		case Get:
+			// TODO
+			return Response{}
+		case Delete:
+			// TODO
+			return Response{}
+		default:
+			return Response{Error: fmt.Errorf("unknown message type")}
+	}
 }
 
 func (n *Node) replicasInitialization() {
