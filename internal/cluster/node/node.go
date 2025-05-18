@@ -31,7 +31,9 @@ func (n *Node) Start() error {
 	go n.heartbeat()
 
 	n.replicasInitialization()
-	go n.tcpListener("TODO"+strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
+	go n.tcpListener("lb-requests-to-node"+strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
+	// go n.tcpListener("leader-requests-to-follower"+strconv.Itoa(n.Id), n.leaderNodeConnectionHandler) // TODO: read about this address
+	// go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.followerNodeConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
 }
@@ -100,6 +102,16 @@ func (n *Node) lbConnectionHandler(msg Message) Response {
 		return Response{Error: fmt.Errorf("unknown message type")}
 	}
 }
+
+// This function handels requests of some node containing a leader with some follower replica in this node
+// func (n *Node) leaderNodeConnectionHandler(msg Message) Response {
+
+// }
+
+// This function sends requests a leader replica in this node to some follower replica another node
+// func (n *Node) followerNodeConnectionHandler(msg Message) Response {
+
+// }
 
 func (n *Node) set(partitionId int, timestamp int64, key string, value string, replicaType replica.ReplicaType) error {
 	r, ok := n.replicas[partitionId]
