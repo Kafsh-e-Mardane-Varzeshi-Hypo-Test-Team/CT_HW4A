@@ -16,14 +16,14 @@ import (
 
 type Node struct {
 	Id       int
-	replicas map[int]*replica.LeaderReplica // partitionId, replica of that partiotionId
+	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
 }
 
 func NewNode(id int) Node {
 	// TODO(discuss): talk with Mohammad about this part. should i run start() function?
 	return Node{
 		Id:       id,
-		replicas: make(map[int]*replica.LeaderReplica),
+		replicas: make(map[int]*replica.Replica),
 	}
 }
 
@@ -82,7 +82,7 @@ func (n *Node) setInLeaderReplica(partiotionId int, key, value string) error {
 
 	// TODO(me): append to WAL
 
-	replicaLog, err := replica.Set(key, value)
+	replicaLog, err := replica.Set(key, value, -1)
 	if err != nil {
 		return fmt.Errorf("[node.setInLeaderReplica] failed to set(key, value) to partitionId: %v in nodeId: %v | err: %v", partiotionId, n.Id, err)
 	}
