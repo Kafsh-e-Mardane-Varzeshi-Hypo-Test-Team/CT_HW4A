@@ -34,8 +34,7 @@ func (n *Node) Start() error {
 
 	n.replicasInitialization()
 	go n.tcpListener("lb-requests-to-node"+strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
-	// go n.tcpListener("leader-requests-to-follower"+strconv.Itoa(n.Id), n.leaderNodeConnectionHandler) // TODO: read about this address
-	// go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.followerNodeConnectionHandler) // TODO: read about this address
+	go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.nodeConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
 }
@@ -106,14 +105,26 @@ func (n *Node) lbConnectionHandler(msg Message) Response {
 }
 
 // This function handels requests of some node containing a leader with some follower replica in this node
-// func (n *Node) leaderNodeConnectionHandler(msg Message) Response {
-
-// }
-
-// This function sends requests a leader replica in this node to some follower replica another node
-// func (n *Node) followerNodeConnectionHandler(msg Message) Response {
-
-// }
+func (n *Node) nodeConnectionHandler(msg Message) Response {
+	switch msg.Type {
+	case Set:
+		err := n.set(msg.PartitionId, msg.Timestamp, msg.Key, msg.Value, replica.Follower)
+		if err != nil {
+			log.Printf("[node.nodeConnectionHandler] failed to set key '%s' in partition %d: %v", msg.Key, msg.PartitionId, err)
+			return Response{Error: err}
+		}
+		return Response{}
+	case Delete:
+		err := n.delete(msg.PartitionId, msg.Timestamp, msg.Key, replica.Follower)
+		if err != nil {
+			log.Printf("[node.nodeConnectionHandler] failed to delete key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
+			return Response{Error: err}
+		}
+		return Response{}
+	default:
+		return Response{Error: fmt.Errorf("unknown message type")}
+	}
+}
 
 func (n *Node) set(partitionId int, timestamp int64, key string, value string, replicaType replica.ReplicaType) error {
 	r, ok := n.replicas[partitionId]
