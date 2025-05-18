@@ -3,6 +3,8 @@ package node
 import (
 	"fmt"
 	"log"
+	"net"
+	"strconv"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/hash"
@@ -107,22 +109,51 @@ func (n *Node) Delete(key string) error {
 	return nil
 }
 
-func Start() {
-	replicasInitialization()
-	tcpInitialization()
-	go heartbeat()
-
+func (n *Node) Start() error {
+	err := n.loadConfig()
+	if err != nil {
+		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
+	}
+	go n.heartbeat()
+	
+	n.replicasInitialization()
+	go n.tcpListener("lb-node-" + strconv.Itoa(n.Id), n.lbHandler)
+	// TODO: other tcp listeners
+	return nil
 }
 
-func replicasInitialization() {
+func (n *Node) loadConfig() error {
+	// TODO
+	return nil
+}
+
+func (n *Node) tcpListener(address string, handler func(net.Conn)) {
+	ln, err := net.Listen("tcp", ":"+address)
+	if err != nil {
+		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", address, err)
+		return
+	}
+	log.Printf("[node.tcpListener] Listening on address %s", address)
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Printf("[node.tcpListener] Connection accept error: %v", err)
+			continue
+		}
+		go handler(conn)
+	}
+}
+
+func (n *Node) lbHandler(conn net.Conn) {
 	// TODO
 }
 
-func tcpInitialization() {
+func (n *Node) replicasInitialization() {
 	// TODO
 }
 
-func heartbeat() {
+func (n *Node) heartbeat() {
 	// TODO
 }
 
