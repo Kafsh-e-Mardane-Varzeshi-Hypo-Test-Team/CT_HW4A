@@ -20,11 +20,11 @@ type Node struct {
 }
 
 func NewNode(id int) Node {
-	// TODO(discuss): talk with Mohammad about this part. should i run start() function?
 	return Node{
 		Id:       id,
 		replicas: make(map[int]*replica.Replica),
 	}
+	// TODO: run node.start node in main.go file of container
 }
 
 func (n *Node) HandleSetFromLB(w http.ResponseWriter, r *http.Request) {
@@ -55,8 +55,9 @@ func (n *Node) HandleSetFromLB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	partitionID := hash.HashKey(req.Key) // Assume this function exists
-	err = n.setInLeaderReplica(partitionID, req.Key, req.Value)
+	// TODO
+	partitionID := hash.HashKey(req.Key)
+	err = n.set(partitionID, req.Key, req.Value)
 	if err != nil {
 		log.Printf("[node.HandleSetFromLB] failed to set key '%s' in partition %d: %v", req.Key, partitionID, err)
 		http.Error(w, fmt.Sprintf("Failed to set key: %v", err), http.StatusInternalServerError)
@@ -68,29 +69,28 @@ func (n *Node) HandleSetFromLB(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func (n *Node) setInLeaderReplica(partiotionId int, key, value string) error {
+func (n *Node) set(partitionId int, timestamp int64, key, value string) error {
 	// find the replica that has to store this key
-	replica, ok := n.replicas[partiotionId]
+	r, ok := n.replicas[partitionId]
 	if !ok {
-		return fmt.Errorf("[node.setInLeaderReplica] node id: %v contains no partition containing key:%s", n.Id, key)
+		return fmt.Errorf("[node.set] node id: %v contains no partition containing key:%s", n.Id, key)
 	}
 
-	// TODO(discuss): if we have only one replica struct (not leader and follower):
-	// if !partition.IsLeader {
-	//    return fmt.Errorf("node id: %v contains no leader for partition %v", n.Id, partitionID)
-	// }
+	if r.Mode == replica.Follower {
+	   return fmt.Errorf("node id: %v contains no leader for partition %v", n.Id, partitionId)
+	}
 
 	// TODO(me): append to WAL
 
-	replicaLog, err := replica.Set(key, value, -1)
+	replicaLog, err := r.Set(key, value, timestamp)
 	if err != nil {
-		return fmt.Errorf("[node.setInLeaderReplica] failed to set(key, value) to partitionId: %v in nodeId: %v | err: %v", partiotionId, n.Id, err)
+		return fmt.Errorf("[node.set] failed to set(key, value) to partitionId: %v in nodeId: %v | err: %v", partitionId, n.Id, err)
 	}
 
 	err = n.broadcastToFollowers(replicaLog)
 	if err != nil {
 		// TODO(discuss): ask if this should be error or log
-		return fmt.Errorf("[node.setInLeaderReplica] failed to broadcast set request to followes in nodeId: %v | err: %v", n.Id, err)
+		return fmt.Errorf("[node.set] failed to broadcast set request to followes in nodeId: %v | err: %v", n.Id, err)
 	}
 
 	return nil
