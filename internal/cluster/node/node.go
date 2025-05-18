@@ -23,82 +23,21 @@ func NewNode(id int) Node {
 	// TODO: run node.start node in main.go file of container
 }
 
-func (n *Node) set(partitionId int, timestamp int64, key string, value string, replicaType replica.ReplicaType) error {
-	r, ok := n.replicas[partitionId]
-	if !ok {
-		return fmt.Errorf("[node.set] node id: %v contains no partition containing key:%s", n.Id, key)
-	}
-
-	if r.Mode != replicaType {
-		return fmt.Errorf("[node.set] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
-	}
-
-	// TODO(me): append to WAL
-	
-	replicaLog, err := r.Set(key, value, timestamp)
-	if err != nil {
-		return fmt.Errorf("[node.set] failed to set(%v, %v) to partitionId: %v in nodeId: %v | err: %v",key, value, partitionId, n.Id, err)
-	}
-
-	if replicaType == replica.Leader {
-		go n.broadcastToFollowers(replicaLog)
-	}
-	return nil
-}
-
-func (n *Node) get(partitionId int, key string) (string, error) {
-	r, ok := n.replicas[partitionId]
-	if !ok {
-		return "", fmt.Errorf("[node.get] node id: %v contains no partition containing key:%s", n.Id, key)
-	}
-
-	replicaLog, err := r.Get(key)
-	if err != nil {
-		return "", fmt.Errorf("[node.get] failed to get(%v) to partitionId: %v in nodeId: %v | err: %v", key, partitionId, n.Id, err)
-	}
-
-	return replicaLog.Value, nil
-}
-
-func (n *Node) delete(partitionId int, timestamp int64, key string, replicaType replica.ReplicaType) error {
-	r, ok := n.replicas[partitionId]
-	if !ok {
-		return fmt.Errorf("[node.delete] node id: %v contains no partition containing key:%s", n.Id, key)
-	}
-
-	if r.Mode != replicaType {
-		return fmt.Errorf("[node.delete] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
-	}
-
-	// TODO(me): append to WAL
-	
-	replicaLog, err := r.Delete(key, timestamp)
-	if err != nil {
-		return fmt.Errorf("[node.delete] failed to delete(%v) from partitionId: %v in nodeId: %v | err: %v",key, partitionId, n.Id, err)
-	}
-
-	if replicaType == replica.Leader {
-		go n.broadcastToFollowers(replicaLog)
-	}
-	return nil
-}
-
 func (n *Node) Start() error {
 	err := n.loadConfig()
 	if err != nil {
 		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
 	}
 	go n.heartbeat()
-	
+
 	n.replicasInitialization()
-	go n.tcpListener("TODO" + strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
+	go n.tcpListener("TODO"+strconv.Itoa(n.Id), n.lbConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
 }
 
-func (n *Node) loadConfig() error {
+func (n *Node) replicasInitialization() {
 	// TODO
-	return nil
 }
 
 func (n *Node) tcpListener(address string, handler func(Message) Response) {
@@ -136,38 +75,90 @@ func (n *Node) tcpListener(address string, handler func(Message) Response) {
 
 func (n *Node) lbConnectionHandler(msg Message) Response {
 	switch msg.Type {
-		case Set:
-			err := n.set(msg.PartitionId, msg.Timestamp, msg.Key, msg.Value, replica.Leader)
-			if err != nil {
-				log.Printf("[node.lbConnectionHandler] failed to set key '%s' in partition %d: %v", msg.Key, msg.PartitionId, err)
-				return Response{Error: err}
-			}
-			return Response{}
-		case Get:
-			val, err := n.get(msg.PartitionId, msg.Key)
-			if err != nil {
-				log.Printf("[node.lbConnectionHandler] failed to get key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
-				return Response{Error: err}
-			}
-			return Response{Value: val}
-		case Delete:
-			err := n.delete(msg.PartitionId, msg.Timestamp, msg.Key, replica.Leader)
-			if err != nil {
-				log.Printf("[node.lbConnectionHandler] failed to delete key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
-				return Response{Error: err}
-			}
-			return Response{}
-		default:
-			return Response{Error: fmt.Errorf("unknown message type")}
+	case Set:
+		err := n.set(msg.PartitionId, msg.Timestamp, msg.Key, msg.Value, replica.Leader)
+		if err != nil {
+			log.Printf("[node.lbConnectionHandler] failed to set key '%s' in partition %d: %v", msg.Key, msg.PartitionId, err)
+			return Response{Error: err}
+		}
+		return Response{}
+	case Get:
+		val, err := n.get(msg.PartitionId, msg.Key)
+		if err != nil {
+			log.Printf("[node.lbConnectionHandler] failed to get key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
+			return Response{Error: err}
+		}
+		return Response{Value: val}
+	case Delete:
+		err := n.delete(msg.PartitionId, msg.Timestamp, msg.Key, replica.Leader)
+		if err != nil {
+			log.Printf("[node.lbConnectionHandler] failed to delete key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
+			return Response{Error: err}
+		}
+		return Response{}
+	default:
+		return Response{Error: fmt.Errorf("unknown message type")}
 	}
 }
 
-func (n *Node) replicasInitialization() {
-	// TODO
+func (n *Node) set(partitionId int, timestamp int64, key string, value string, replicaType replica.ReplicaType) error {
+	r, ok := n.replicas[partitionId]
+	if !ok {
+		return fmt.Errorf("[node.set] node id: %v contains no partition containing key:%s", n.Id, key)
+	}
+
+	if r.Mode != replicaType {
+		return fmt.Errorf("[node.set] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
+	}
+
+	// TODO(me): append to WAL
+
+	replicaLog, err := r.Set(key, value, timestamp)
+	if err != nil {
+		return fmt.Errorf("[node.set] failed to set(%v, %v) to partitionId: %v in nodeId: %v | err: %v", key, value, partitionId, n.Id, err)
+	}
+
+	if replicaType == replica.Leader {
+		go n.broadcastToFollowers(replicaLog)
+	}
+	return nil
 }
 
-func (n *Node) heartbeat() {
-	// TODO
+func (n *Node) get(partitionId int, key string) (string, error) {
+	r, ok := n.replicas[partitionId]
+	if !ok {
+		return "", fmt.Errorf("[node.get] node id: %v contains no partition containing key:%s", n.Id, key)
+	}
+
+	replicaLog, err := r.Get(key)
+	if err != nil {
+		return "", fmt.Errorf("[node.get] failed to get(%v) to partitionId: %v in nodeId: %v | err: %v", key, partitionId, n.Id, err)
+	}
+
+	return replicaLog.Value, nil
+}
+
+func (n *Node) delete(partitionId int, timestamp int64, key string, replicaType replica.ReplicaType) error {
+	r, ok := n.replicas[partitionId]
+	if !ok {
+		return fmt.Errorf("[node.delete] node id: %v contains no partition containing key:%s", n.Id, key)
+	}
+
+	if r.Mode != replicaType {
+		return fmt.Errorf("[node.delete] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
+	}
+
+	// TODO(me): append to WAL
+
+	replicaLog, err := r.Delete(key, timestamp)
+	if err != nil {
+		return fmt.Errorf("[node.delete] failed to delete(%v) from partitionId: %v in nodeId: %v | err: %v", key, partitionId, n.Id, err)
+	}
+
+	if replicaType == replica.Leader {
+		go n.broadcastToFollowers(replicaLog)
+	}
+	return nil
 }
 
 // This function broadcase set/delete requests to all follower replicas
@@ -206,4 +197,13 @@ func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
 	// 		log.Printf("[node.broadcastToFollowers] Giving up on follower node %s after %d retries", fn.Address, maxRetries)
 	// 	}(fn)
 	// }
+}
+
+func (n *Node) loadConfig() error {
+	// TODO
+	return nil
+}
+
+func (n *Node) heartbeat() {
+	// TODO
 }
