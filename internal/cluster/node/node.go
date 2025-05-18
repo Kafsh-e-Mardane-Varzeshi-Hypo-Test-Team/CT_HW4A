@@ -15,6 +15,7 @@ import (
 const (
 	CONTROLLER_ADDRESS = "8000"
 )
+
 type Node struct {
 	Id       int
 	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
@@ -267,8 +268,29 @@ func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
 }
 
 func (n *Node) getNodesContainingPartition(partitionId int) ([]controller.NodeMetadata, error) {
-	// TODO
-	return make([]controller.NodeMetadata, 0), nil
+	conn, err := net.Dial("tcp", ":"+CONTROLLER_ADDRESS)
+	if err != nil {
+		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to connect to controller at %s: %v", CONTROLLER_ADDRESS, err)
+	}
+	defer conn.Close()
+
+	encoder := gob.NewEncoder(conn)
+	decoder := gob.NewDecoder(conn)
+
+	if err := encoder.Encode("GetNodesContainingPartition"); err != nil {
+		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to encode request type: %v", err)
+	}
+
+	if err := encoder.Encode(partitionId); err != nil {
+		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to encode partition ID: %v", err)
+	}
+
+	var nodes []controller.NodeMetadata
+	if err := decoder.Decode(&nodes); err != nil {
+		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to decode response: %v", err)
+	}
+
+	return nodes, nil
 }
 
 func (n *Node) loadConfig() error {
