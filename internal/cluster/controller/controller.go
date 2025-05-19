@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"log"
 	"sync"
 )
 
@@ -9,7 +10,7 @@ type Controller struct {
 	mu                sync.Mutex
 	partitionCount    int
 	replicationFactor int
-	Nodes             map[string]*NodeMetadata
+	Nodes             map[int]*NodeMetadata
 	Partitions        []*PartitionMetadata
 }
 
@@ -17,7 +18,7 @@ func NewController(partitionCount, replicationFactor int) *Controller {
 	return &Controller{
 		partitionCount:    partitionCount,
 		replicationFactor: replicationFactor,
-		Nodes:             make(map[string]*NodeMetadata),
+		Nodes:             make(map[int]*NodeMetadata),
 		Partitions:        make([]*PartitionMetadata, partitionCount),
 	}
 }
@@ -25,6 +26,8 @@ func NewController(partitionCount, replicationFactor int) *Controller {
 func (c *Controller) RegisterNode(node *NodeMetadata) error {
 	c.mu.Lock()
 	if _, exists := c.Nodes[node.ID]; exists {
+		c.mu.Unlock()
+		log.Printf("controller::register-node: Node %d already exists.\n", node.ID)
 		return errors.New("node already exists")
 	}
 	c.mu.Unlock()

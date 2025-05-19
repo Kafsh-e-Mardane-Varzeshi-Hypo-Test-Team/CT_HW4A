@@ -1,7 +1,7 @@
 package controller
 
 type NodeMetadata struct {
-	ID      string `json:"id"`
+	ID      int `json:"id"`
 	Address string `json:"address"`
 	IsAlive bool   `json:"isAlive"`
 }
