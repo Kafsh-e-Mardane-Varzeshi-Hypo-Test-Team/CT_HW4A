@@ -20,7 +20,7 @@ type Replica struct {
 	Mode        ReplicaType
 
 	data      map[string]ReplicaData
-	logs      []ReplicaLog
+	lsm       *LSM
 	timestamp int64 // only used in Leader type
 	mu        sync.RWMutex
 }
@@ -32,7 +32,7 @@ func NewReplica(id, nodeId, partitionId int, mode ReplicaType) *Replica {
 		PartitionId: partitionId,
 		Mode:        mode,
 		data:        make(map[string]ReplicaData),
-		logs:        []ReplicaLog{},
+		lsm:         NewLSM(),
 		timestamp:   0,
 		mu:          sync.RWMutex{},
 	}
@@ -76,7 +76,10 @@ func (r *Replica) Set(key, value string, timestamp int64) (ReplicaLog, error) {
 		Value:       value,
 	}
 
-	r.logs = append(r.logs, logEntry)
+	if r.Mode == Leader {
+		r.lsm.AddLogEntry(logEntry)
+	}
+
 	log.Println(r.modePrefix() + "SetKey: " + logEntry.String())
 	return logEntry, nil
 }
@@ -148,59 +151,12 @@ func (r *Replica) Delete(key string, timestamp int64) (ReplicaLog, error) {
 		Value:       "",
 	}
 
-	r.logs = append(r.logs, logEntry)
+	if r.Mode == Leader {
+		r.lsm.AddLogEntry(logEntry)
+	}
+
 	log.Println(r.modePrefix() + "DeleteKey: " + logEntry.String())
 	return logEntry, nil
-}
-
-// Logs filtering helpers
-func (r *Replica) DropLogsBefore(timestamp int64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	idx := r.searchLogs(timestamp)
-	if idx >= len(r.logs) {
-		r.logs = []ReplicaLog{}
-		log.Println("no logs found since timestamp " + strconv.FormatInt(timestamp, 10) + ", dropped all logs")
-		return
-	}
-
-	r.logs = r.logs[idx:]
-	log.Println("kept " + strconv.Itoa(len(r.logs)) + " logs since timestamp " + strconv.FormatInt(timestamp, 10))
-}
-
-func (r *Replica) GetLogsSince(timestamp int64) []ReplicaLog {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	idx := r.searchLogs(timestamp)
-	if idx >= len(r.logs) {
-		log.Println("no logs found since timestamp " + strconv.FormatInt(timestamp, 10))
-		return []ReplicaLog{}
-	}
-
-	logs := r.logs[idx:]
-	log.Println("returned " + strconv.Itoa(len(logs)) + " logs since timestamp " + strconv.FormatInt(timestamp, 10))
-	return logs
-}
-
-// GetLogs returns the logs between the given timestamps.
-// Start timestamp is inclusive and end timestamp is exclusive.
-func (r *Replica) GetLogs(start, end int64) []ReplicaLog {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	startIdx := r.searchLogs(start)
-	endIdx := r.searchLogs(end)
-
-	if startIdx >= len(r.logs) || endIdx <= startIdx {
-		log.Println("no logs found between timestamps " + strconv.FormatInt(start, 10) + " and " + strconv.FormatInt(end, 10))
-		return []ReplicaLog{}
-	}
-
-	logs := r.logs[startIdx:endIdx]
-	log.Println("returned " + strconv.Itoa(len(logs)) + " logs from timestamp " + strconv.FormatInt(start, 10) + " before " + strconv.FormatInt(end, 10))
-	return logs
 }
 
 // Mode transition
@@ -211,29 +167,20 @@ func (r *Replica) ConvertToLeader() {
 		return
 	}
 	r.Mode = Leader
-	if len(r.logs) > 0 {
-		r.timestamp = r.logs[len(r.logs)-1].Timestamp + 1
-	}
+	r.timestamp = 0
+	r.lsm.mu.Lock()
+	defer r.lsm.mu.Unlock()
+	r.lsm = NewLSM()
 }
 
 func (r *Replica) ConvertToFollower() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.Mode = Follower
-}
-
-// Binary search for the first log entry with a timestamp >= timestamp
-func (r *Replica) searchLogs(timestamp int64) int {
-	start, end := 0, len(r.logs)-1
-	for start <= end {
-		mid := (start + end) / 2
-		if r.logs[mid].Timestamp < timestamp {
-			start = mid + 1
-		} else {
-			end = mid - 1
-		}
-	}
-	return start
+	r.timestamp = 0
+	r.lsm.mu.Lock()
+	defer r.lsm.mu.Unlock()
+	r.lsm = NewLSM()
 }
 
 func (r *Replica) modePrefix() string {
@@ -241,4 +188,77 @@ func (r *Replica) modePrefix() string {
 		return "Leader"
 	}
 	return "Follower"
+}
+
+func (r *Replica) ReceiveSnapshot(snapshot *Snapshot) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.lsm.mu.Lock()
+	defer r.lsm.mu.Unlock()
+
+	r.lsm.immutables = make([]*MemTable, len(snapshot.Tables))
+	for i := range snapshot.Tables {
+		r.lsm.immutables[i] = &snapshot.Tables[i]
+	}
+
+	// apply data from snapshot
+	r.data = make(map[string]ReplicaData)
+	for _, table := range snapshot.Tables {
+		for _, logEntry := range table.data {
+			r.ApplyLogEntry(logEntry)
+		}
+	}
+
+	// log number of data entries after applying snapshot
+	log.Printf("Replica %d applied snapshot resulting in %d data entries\n", r.Id, len(r.data))
+
+	r.lsm.mem = NewMemTable()
+}
+
+func (r *Replica) GetSnapshot() *Snapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.lsm.mem.data) > 0 {
+		r.lsm.flush()
+	}
+
+	r.lsm.mu.RLock()
+	defer r.lsm.mu.RUnlock()
+
+	snapshot := &Snapshot{
+		Tables: make([]MemTable, len(r.lsm.immutables)),
+	}
+
+	for i, table := range r.lsm.immutables {
+		snapshot.Tables[i] = *table
+	}
+
+	log.Println("Snapshot created with " + strconv.FormatInt(int64(len(snapshot.Tables)), 10) + " tables")
+
+	return snapshot
+}
+
+// does NOT acquire lock. assumes caller has already acquired the lock.
+func (r *Replica) ApplyLogEntry(logEntry ReplicaLog) {
+	if logEntry.Action == ReplicaActionSet {
+		if currentData, exists := r.data[logEntry.Key]; !exists || currentData.Timestamp < logEntry.Timestamp {
+			data := ReplicaData{
+				Value:     logEntry.Value,
+				Timestamp: logEntry.Timestamp,
+			}
+			r.data[logEntry.Key] = data
+		} else {
+			log.Println("Key " + logEntry.Key + " already exists with a newer timestamp, ignoring snapshot entry")
+		}
+	} else if logEntry.Action == ReplicaActionDelete {
+		if _, exists := r.data[logEntry.Key]; exists {
+			delete(r.data, logEntry.Key)
+		} else {
+			log.Println("Key " + logEntry.Key + " not found for deletion in snapshot")
+		}
+	} else {
+		log.Println("Unknown action in snapshot entry: " + logEntry.String())
+	}
 }
