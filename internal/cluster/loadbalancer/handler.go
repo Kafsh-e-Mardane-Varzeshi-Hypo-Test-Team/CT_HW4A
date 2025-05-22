@@ -1,0 +1,156 @@
+package loadbalancer
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+func (lb *LoadBalancer) setupRoutes() {
+	lb.ginEngine.GET("/:key", lb.handleGet)
+	lb.ginEngine.POST("/", lb.handleGet)
+	lb.ginEngine.DELETE("/:key", lb.handleGet)
+}
+
+func (lb *LoadBalancer) Run(addr string) error {
+	return lb.ginEngine.Run(addr)
+}
+
+func (lb *LoadBalancer) handleGet(c *gin.Context) {
+	key := c.Param("key")
+	partitionID := lb.getPartitionID(key)
+
+	nodeAddr, err := lb.getReplicaForRead(partitionID)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+
+	var resp *http.Response
+	var responseBody []byte
+
+	for i := 0; i < lb.maxRetries; i++ {
+		resp, err = lb.doNodeRequest(http.MethodGet, nodeAddr, key, "")
+		if err == nil {
+			defer resp.Body.Close()
+			responseBody, err = io.ReadAll(resp.Body)
+			if err == nil {
+				break
+			}
+		}
+
+		if i < lb.maxRetries-1 {
+			lb.refreshMetadata()
+			nodeAddr, _ = lb.getReplicaForRead(partitionID)
+			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+		}
+	}
+
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Forward the response
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
+}
+
+func (lb *LoadBalancer) handleSet(c *gin.Context) {
+	key := c.PostForm("key")
+	value := c.PostForm("value")
+
+	partitionID := lb.getPartitionID(key)
+	leaderAddr, err := lb.getLeaderForPartition(partitionID)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+
+	var resp *http.Response
+	var responseBody []byte
+
+	for i := 0; i < lb.maxRetries; i++ {
+		resp, err = lb.doNodeRequest(c.Request.Method, leaderAddr, key, value)
+		if err == nil {
+			defer resp.Body.Close()
+			responseBody, err = io.ReadAll(resp.Body)
+			if err == nil {
+				break
+			}
+		}
+
+		if i < lb.maxRetries-1 {
+			lb.refreshMetadata()
+			leaderAddr, _ = lb.getLeaderForPartition(partitionID)
+			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+		}
+	}
+
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
+}
+
+func (lb *LoadBalancer) handleDelete(c *gin.Context) {
+	key := c.Param("key")
+	partitionID := lb.getPartitionID(key)
+	leaderAddr, err := lb.getLeaderForPartition(partitionID)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+
+	var resp *http.Response
+	var responseBody []byte
+
+	for i := 0; i < lb.maxRetries; i++ {
+		resp, err = lb.doNodeRequest(http.MethodDelete, leaderAddr, key, "")
+		if err == nil {
+			defer resp.Body.Close()
+			responseBody, err = io.ReadAll(resp.Body)
+			if err == nil {
+				break
+			}
+		}
+
+		if i < lb.maxRetries-1 {
+			lb.refreshMetadata()
+			leaderAddr, _ = lb.getLeaderForPartition(partitionID)
+			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+		}
+	}
+
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
+}
+
+func (lb *LoadBalancer) doNodeRequest(method, nodeAddr, key, value string) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lb.requestTimeout)
+	defer cancel()
+
+	url := fmt.Sprintf("%s/%s", nodeAddr, key)
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if value != "" {
+		req.Body = io.NopCloser(strings.NewReader(value))
+		req.ContentLength = int64(len(value))
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return lb.httpClient.Do(req)
+}
