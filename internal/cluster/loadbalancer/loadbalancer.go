@@ -29,7 +29,7 @@ type LoadBalancer struct {
 	partitionCache  []*controller.PartitionMetadata
 }
 
-func NewLoadBalancer(controllerAddr string) {
+func NewLoadBalancer(controllerAddr string) *LoadBalancer {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -57,6 +57,8 @@ func NewLoadBalancer(controllerAddr string) {
 	}
 
 	go lb.metadataRefresher()
+
+	return lb
 }
 
 func (lb *LoadBalancer) getPartitionID(key string) int {
