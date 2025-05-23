@@ -11,7 +11,7 @@ import (
 
 func (n *Node) setupRoutes() {
 	n.ginEngine.POST("/add-partition/:partition-id", n.handleAddPartition)
-	n.ginEngine.POST("/delete-partition/:partition-id", n.handleDeletePartition)
+	n.ginEngine.DELETE("/delete-partition/:partition-id", n.handleDeletePartition)
 	// n.ginEngine.DELETE("/delete-partition", n.handleDeletePartition)
 }
 
