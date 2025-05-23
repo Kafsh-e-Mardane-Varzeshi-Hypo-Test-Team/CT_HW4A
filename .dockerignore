@@ -1,0 +1,29 @@
+# Go build artifacts
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# VCS
+.git
+.gitignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor-specific files
+.idea/
+.vscode/
+*.swp
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
