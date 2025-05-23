@@ -13,8 +13,8 @@ import (
 
 func (lb *LoadBalancer) setupRoutes() {
 	lb.ginEngine.GET("/:key", lb.handleGet)
-	lb.ginEngine.POST("/", lb.handleGet)
-	lb.ginEngine.DELETE("/:key", lb.handleGet)
+	lb.ginEngine.POST("/", lb.handleSet)
+	lb.ginEngine.DELETE("/:key", lb.handleDelete)
 }
 
 func (lb *LoadBalancer) Run(addr string) error {
