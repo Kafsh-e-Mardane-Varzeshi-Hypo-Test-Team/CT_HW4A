@@ -50,7 +50,7 @@ func NewNode(id int) *Node {
 func (n *Node) Start() {
 	n.setupRoutes()
 	n.ginEngine.Run(HTTP_ADDRESS)
-	
+
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 	go n.tcpListener(n.nodeConnectionHandler)
 }
@@ -104,6 +104,14 @@ func (n *Node) nodeConnectionHandler(msg Message) Response {
 			log.Printf("[node.nodeConnectionHandler] failed to delete key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
 			return Response{Error: err}
 		}
+		return Response{}
+	case Snapshot:
+		replica, exists := n.replicas[msg.PartitionId]
+		if !exists {
+			return Response{Error: fmt.Errorf("partition %d not found in node %d", msg.PartitionId, n.Id)}
+		}
+		replica.ReceiveSnapshot(&msg.Snapshot)
+		log.Printf("[nodeConnectionHandler] Received snapshot for partition %d", msg.PartitionId)
 		return Response{}
 	default:
 		return Response{Error: fmt.Errorf("unknown message type")}
@@ -191,7 +199,7 @@ func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
 	}
 }
 
-func (n *Node) replicateToFollower(address string, msg Message) {
+func (n *Node) replicateToFollower(address string, msg Message) error {
 	maxRetries := 3
 	retryDelay := 100 * time.Millisecond
 	for i := 0; i < maxRetries; i++ {
@@ -236,10 +244,11 @@ func (n *Node) replicateToFollower(address string, msg Message) {
 		}
 
 		log.Printf("[node.replicateToFollower] successfully replicated to %s", address)
-		return
+		return nil
 	}
 
 	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", address, maxRetries)
+	return fmt.Errorf("failed to replicate to follower at %s after %d retries", address, maxRetries)
 }
 
 func (n *Node) startHeartbeat(interval time.Duration) {
@@ -252,4 +261,25 @@ func (n *Node) startHeartbeat(interval time.Duration) {
 			time.Sleep(interval)
 		}
 	}()
+}
+
+func (n *Node) SendSnapshotToNode(originReplica *replica.Replica, address string) error {
+	snapshot := originReplica.GetSnapshot()
+	if snapshot == nil {
+		return fmt.Errorf("failed to get snapshot for partition %d", originReplica.PartitionId)
+	}
+
+	msg := Message{
+		Type:        Snapshot,
+		PartitionId: originReplica.PartitionId,
+		Snapshot:    *snapshot,
+	}
+
+	err := n.replicateToFollower(address, msg)
+
+	if err != nil {
+		return err
+	}
+	log.Printf("[node.SendSnapshotToNode] successfully sent snapshot of partition %d to %s", originReplica.PartitionId, address)
+	return nil
 }

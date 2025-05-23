@@ -64,7 +64,35 @@ func (n *Node) handleDeletePartition(c *gin.Context) {
 }
 
 func (n *Node) handleSendPartitionToNode(c *gin.Context) {
-	// TODO
+	partitionId, err := strconv.Atoi(c.Param("partition-id"))
+	if err != nil {
+		log.Printf("[node.handleSendPartitionToNode] error while converting partitionId param to int: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	address := c.Param("address")
+	if address == "" {
+		log.Printf("[node.handleSendPartitionToNode] missing address parameter")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing address parameter"})
+		return
+	}
+
+	replica, ok := n.replicas[partitionId]
+	if !ok {
+		log.Printf("[node.handleSendPartitionToNode] partitionId %v does not exist in nodeId %v", partitionId, n.Id)
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Errorf("partitionId %v does not exist", partitionId)})
+		return
+	}
+
+	if err := n.SendSnapshotToNode(replica, address); err != nil {
+		log.Printf("[node.handleSendPartitionToNode] %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Snapshot sent successfully"})
+
 }
 
 func (n *Node) handleSetRequest(c *gin.Context) {
