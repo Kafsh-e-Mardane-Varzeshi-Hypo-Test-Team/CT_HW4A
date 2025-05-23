@@ -99,8 +99,8 @@ func (c *Controller) RegisterNode(nodeID int) error {
 
 	c.mu.Lock()
 	node := c.nodes[nodeID]
-	node.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
-	node.HttpAddress = fmt.Sprintf("node-%d:%s", nodeID, httpPort)
+	node.TcpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, tcpPort)
+	node.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
 	node.Status = Syncing
 	c.mu.Unlock()
 

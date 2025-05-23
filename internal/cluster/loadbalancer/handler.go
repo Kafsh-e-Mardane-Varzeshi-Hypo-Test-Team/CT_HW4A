@@ -66,8 +66,8 @@ func (lb *LoadBalancer) handleGet(c *gin.Context) {
 }
 
 func (lb *LoadBalancer) handleSet(c *gin.Context) {
-	key := c.PostForm("key")
-	value := c.PostForm("value")
+	key := c.Param("key")
+	value := c.Param("value")
 
 	partitionID := lb.getPartitionID(key)
 	leaderAddr, err := lb.getLeaderForPartition(partitionID)
