@@ -26,8 +26,13 @@ func (c *Controller) handleGetMetadata(ctx *gin.Context) {
 	defer c.mu.Unlock()
 
 	metadata := struct {
-		Partitions []*PartitionMetadata `json:"partitions"`
+		NodeAddresses map[int]string       `json:"nodes"`
+		Partitions    []*PartitionMetadata `json:"partitions"`
 	}{}
+	metadata.NodeAddresses = make(map[int]string, len(c.nodes))
+	for id, node := range c.nodes {
+		metadata.NodeAddresses[id] = node.HttpAddress
+	}
 	metadata.Partitions = c.partitions
 
 	ctx.JSON(http.StatusOK, metadata)
@@ -46,7 +51,7 @@ func (c *Controller) handleGetNodeMetadata(ctx *gin.Context) {
 	c.mu.Lock()
 	metadata.Addresses = make([]string, len(c.partitions[partitionID].Replicas))
 	for i, replica := range c.partitions[partitionID].Replicas {
-		metadata.Addresses[i] = c.nodes[replica].Address
+		metadata.Addresses[i] = c.nodes[replica].TcpAddress
 	}
 	c.mu.Unlock()
 

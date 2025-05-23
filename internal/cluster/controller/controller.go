@@ -84,13 +84,15 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	imageName := c.nodeImage
 	nodeName := "node-" + strconv.Itoa(nodeID)
 	networkName := c.networkName
-	exposedPort := "8080/tcp"
+	tcpPort := "8080"
+	httpPort := "8080"
 
 	err := c.dockerClient.CreateNodeContainer(
 		imageName,
 		nodeName,
 		networkName,
-		nat.Port(exposedPort),
+		nat.Port(tcpPort),
+		nat.Port(httpPort),
 	)
 	if err != nil {
 		log.Printf("controller::RegisterNode: Failed to create docker container for node %d\n", nodeID)
@@ -99,7 +101,8 @@ func (c *Controller) RegisterNode(nodeID int) error {
 
 	c.mu.Lock()
 	node := c.nodes[nodeID]
-	node.Address = nodeName
+	node.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
+	node.HttpAddress = fmt.Sprintf("node-%d:%s", nodeID, httpPort)
 	node.Status = Syncing
 	c.mu.Unlock()
 
@@ -161,15 +164,17 @@ func (c *Controller) replicate(partitionID, nodeID int) error {
 	c.mu.Lock()
 	if c.partitions[partitionID].Leader == -1 {
 		c.partitions[partitionID].Leader = nodeID
+
+		addr := fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
 		c.mu.Unlock()
 
-		addr := fmt.Sprintf("node-%d:8080/add-partition/%d", nodeID, partitionID)
 		resp, err := c.doNodeRequest("POST", addr)
-		defer resp.Body.Close()
+		fmt.Println(resp, err)
 		if err != nil {
 			log.Printf("controller::replicate: Failed to add partition %d to node %d: %v\n", partitionID, nodeID, err)
 			return errors.New("failed to add partition")
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("controller::replicate: Failed to add partition %d to node %d: %s. partition already exists.\n", partitionID, nodeID, resp.Status)
 		}

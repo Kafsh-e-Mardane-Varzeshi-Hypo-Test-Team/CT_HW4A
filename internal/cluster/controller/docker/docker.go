@@ -25,13 +25,14 @@ func NewDockerClient() (*DockerClient, error) {
 	return &DockerClient{cli: cli, respIDs: make(map[string]string)}, nil
 }
 
-func (d *DockerClient) CreateNodeContainer(imageName, nodeName, networkName string, exposedPort nat.Port) error {
+func (d *DockerClient) CreateNodeContainer(imageName, nodeName, networkName string, tcpPort nat.Port, httpPort nat.Port) error {
 	ctx := context.Background()
 
 	resp, err := d.cli.ContainerCreate(ctx, &container.Config{
 		Image: imageName,
 		ExposedPorts: nat.PortSet{
-			exposedPort: {},
+			tcpPort:  {},
+			httpPort: {},
 		},
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(networkName),

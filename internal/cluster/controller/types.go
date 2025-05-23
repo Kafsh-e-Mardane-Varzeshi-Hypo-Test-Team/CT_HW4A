@@ -14,10 +14,11 @@ const (
 )
 
 type NodeMetadata struct {
-	ID       int        `json:"id"`
-	Address  string     `json:"address"`
-	Status   NodeStatus `json:"status"`
-	lastSeen time.Time
+	ID          int        `json:"id"`
+	HttpAddress string     `json:"http"`
+	TcpAddress  string     `json:"tcp"`
+	Status      NodeStatus `json:"status"`
+	lastSeen    time.Time
 }
 
 type PartitionMetadata struct {

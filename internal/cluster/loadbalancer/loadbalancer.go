@@ -9,7 +9,6 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -18,15 +17,16 @@ import (
 )
 
 type LoadBalancer struct {
-	controllerAddr  string
-	httpClient      *http.Client
-	ginEngine       *gin.Engine
-	metadataLock    sync.RWMutex
-	metadataExpiry  time.Time
-	refreshInterval time.Duration
-	requestTimeout  time.Duration
-	maxRetries      int
-	partitionCache  []*controller.PartitionMetadata
+	controllerAddr   string
+	httpClient       *http.Client
+	ginEngine        *gin.Engine
+	metadataLock     sync.RWMutex
+	metadataExpiry   time.Time
+	refreshInterval  time.Duration
+	requestTimeout   time.Duration
+	maxRetries       int
+	partitionCache   []*controller.PartitionMetadata
+	nodeAddressCache map[int]string
 }
 
 func NewLoadBalancer(controllerAddr string) *LoadBalancer {
@@ -78,7 +78,7 @@ func (lb *LoadBalancer) getLeaderForPartition(partitionID int) (string, error) {
 		return "", fmt.Errorf("invalid partition ID: %d", partitionID)
 	}
 
-	return "node-" + strconv.Itoa(lb.partitionCache[partitionID].Leader), nil
+	return lb.nodeAddressCache[lb.partitionCache[partitionID].Leader], nil
 }
 
 func (lb *LoadBalancer) getReplicaForRead(partitionID int) (string, error) {
@@ -95,17 +95,17 @@ func (lb *LoadBalancer) getReplicaForRead(partitionID int) (string, error) {
 
 	replicas := lb.partitionCache[partitionID].Replicas
 	if len(replicas) == 0 {
-		return "node-" + strconv.Itoa(lb.partitionCache[partitionID].Leader), nil
+		return lb.nodeAddressCache[lb.partitionCache[partitionID].Leader], nil
 	}
 
-	return "node-" + strconv.Itoa(replicas[rand.Intn(len(replicas))]), nil
+	return lb.nodeAddressCache[replicas[rand.Intn(len(replicas))]], nil
 }
 
 func (lb *LoadBalancer) refreshMetadata() error {
 	ctx, cancel := context.WithTimeout(context.Background(), lb.requestTimeout)
 	defer cancel()
 
-	url := fmt.Sprintf("http://%s/metadata", lb.controllerAddr)
+	url := fmt.Sprintf("%s/metadata", lb.controllerAddr)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
@@ -122,7 +122,8 @@ func (lb *LoadBalancer) refreshMetadata() error {
 	}
 
 	metadata := struct {
-		Partitions []*controller.PartitionMetadata `json:"partitions"`
+		NodeAddresses map[int]string                  `json:"nodes"`
+		Partitions    []*controller.PartitionMetadata `json:"partitions"`
 	}{}
 	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
 		return err
@@ -132,6 +133,7 @@ func (lb *LoadBalancer) refreshMetadata() error {
 	defer lb.metadataLock.Unlock()
 
 	lb.metadataExpiry = time.Now().Add(lb.refreshInterval)
+	lb.nodeAddressCache = metadata.NodeAddresses
 	lb.partitionCache = metadata.Partitions
 
 	return nil
