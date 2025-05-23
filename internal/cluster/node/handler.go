@@ -57,7 +57,7 @@ func (n *Node) handleDeletePartition(c *gin.Context) {
 		return
 	}
 
-	n.replicas[partitionId] = nil
+	delete(n.replicas, partitionId)
 	c.JSON(http.StatusOK, nil)
 }
 
