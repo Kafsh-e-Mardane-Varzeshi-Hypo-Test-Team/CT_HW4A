@@ -147,6 +147,13 @@ func (c *Controller) makeNodeReady(nodeID int) {
 				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d: %v\n", partition, nodeID, err)
 				break
 			}
+			if i == 2 {
+				log.Printf("controller::makeNodeReady: Failed to replicate partition %d to node %d: %v\n", partition, nodeID, err)
+				c.dockerClient.RemoveNodeContainer(nodeID)
+				return
+			}
+			log.Printf("controller::makeNodeReady: Retrying to replicate partition %d to node %d: %v\n", partition, nodeID, err)
+			time.Sleep(1 * time.Second)
 		}
 	}
 
@@ -159,11 +166,9 @@ func (c *Controller) makeNodeReady(nodeID int) {
 }
 
 func (c *Controller) replicate(partitionID, nodeID int) error {
-	c.mu.Lock()
 	if c.partitions[partitionID].Leader == -1 {
-		c.partitions[partitionID].Leader = nodeID
-
-		addr := fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
+		c.mu.Lock()
+		addr := fmt.Sprintf("http://%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
 		c.mu.Unlock()
 
 		resp, err := c.doNodeRequest("POST", addr)
@@ -174,15 +179,34 @@ func (c *Controller) replicate(partitionID, nodeID int) error {
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("controller::replicate: Failed to add partition %d to node %d: %s. partition already exists.\n", partitionID, nodeID, resp.Status)
+			return errors.New("failed to add partition")
 		}
+
+		c.mu.Lock()
+		c.partitions[partitionID].Leader = nodeID
+		c.mu.Unlock()
+		log.Printf("controller::replicate: Partition %d leader set to node %d\n", partitionID, nodeID)
 		return nil
 	}
+
+	c.mu.Lock()
+	addr := fmt.Sprintf("http://%s/add-replica/%d", c.nodes[c.partitions[partitionID].Leader].HttpAddress, nodeID)
 	c.mu.Unlock()
 
-	// TODO: request to partition leader node to replicate in the new node
-	// retry mechanism
-	// add nodeID to partition
+	resp, err := c.doNodeRequest("POST", addr)
+	if err != nil {
+		log.Printf("controller::replicate: Failed to add replica %d to partition %d: %v\n", nodeID, partitionID, err)
+		return errors.New("failed to add replica")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("controller::replicate: Failed to add replica %d to partition %d: %s\n", nodeID, partitionID, resp.Status)
+		return errors.New("failed to add replica")
+	}
 
+	c.mu.Lock()
+	c.partitions[partitionID].Replicas = append(c.partitions[partitionID].Replicas, nodeID)
+	c.mu.Unlock()
 	log.Printf("controller::replicate: Partition %d replicated to node %d\n", partitionID, nodeID)
 	return nil
 }
