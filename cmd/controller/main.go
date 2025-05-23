@@ -13,7 +13,7 @@ func main() {
 		panic("Failed to create Docker client")
 	}
 	controller := controller.NewController(dockerClient, 3, 2, "temp", "helloworld:1")
-	if err := controller.Run(":8080"); err != nil {
+	if err := controller.Start(":8080"); err != nil {
 		log.Fatalf("Failed to start controller: %v", err)
 	}
 }

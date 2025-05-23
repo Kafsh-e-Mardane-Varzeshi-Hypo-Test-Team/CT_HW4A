@@ -108,8 +108,20 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	return nil
 }
 
-func (c *Controller) Start() {
+func (c *Controller) Start(addr string) error {
+	if err := c.RegisterNode(1); err != nil {
+		log.Fatalf("Failed to create initial node: %v", err)
+	}
 
+	err := c.Run(addr)
+	if err != nil {
+		log.Printf("controller::Start: Failed to run http server")
+		return err
+	}
+
+	go c.monitorHeartbeat()
+
+	return nil
 }
 
 func (c *Controller) makeNodeReady(nodeID int) {
@@ -183,4 +195,19 @@ func (c *Controller) doNodeRequest(method, addr string) (*http.Response, error) 
 	}
 
 	return c.httpClient.Do(req)
+}
+
+func (c *Controller) monitorHeartbeat() {
+	for {
+		c.mu.Lock()
+		for _, node := range c.nodes {
+			if time.Since(node.lastSeen) > 10*time.Second {
+				log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
+				node.Status = Failed
+			}
+		}
+		c.mu.Unlock()
+
+		time.Sleep(5 * time.Second)
+	}
 }

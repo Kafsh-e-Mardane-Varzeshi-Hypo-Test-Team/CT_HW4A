@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,9 +18,6 @@ func (c *Controller) setupRoutes() {
 }
 
 func (c *Controller) Run(addr string) error {
-	if err := c.RegisterNode(1); err != nil {
-		log.Fatalf("Failed to create initial node: %v", err)
-	}
 	return c.ginEngine.Run(addr)
 }
 
