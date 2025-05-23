@@ -10,6 +10,7 @@ import (
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -18,14 +19,20 @@ const (
 )
 
 type Node struct {
-	Id       int
-	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
+	Id        int
+	replicas  map[int]*replica.Replica // partitionId, replica of that partiotionId
+	ginEngine *gin.Engine
 }
 
 func NewNode(id int) Node {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+
 	return Node{
 		Id:       id,
 		replicas: make(map[int]*replica.Replica),
+		ginEngine: router,
 	}
 	// TODO: run node.start node in main.go file of container
 }
