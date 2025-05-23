@@ -3,12 +3,14 @@ package controller
 import (
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
 func (c *Controller) setupRoutes() {
 	c.ginEngine.GET("/metadata", c.handleGetMetadata)
+	c.ginEngine.GET("/node-metadata/:partitionID", c.handleGetNodeMetadata)
 
 	c.ginEngine.POST("/nodes", c.handleRegisterNode)
 }
@@ -28,6 +30,26 @@ func (c *Controller) handleGetMetadata(ctx *gin.Context) {
 		Partitions []*PartitionMetadata `json:"partitions"`
 	}{}
 	metadata.Partitions = c.partitions
+
+	ctx.JSON(http.StatusOK, metadata)
+}
+
+func (c *Controller) handleGetNodeMetadata(ctx *gin.Context) {
+	partitionID, err := strconv.Atoi(ctx.Param("partitionID"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
+		return
+	}
+
+	metadata := struct {
+		Addresses []string `json:"addresses"`
+	}{}
+	c.mu.Lock()
+	metadata.Addresses = make([]string, len(c.partitions[partitionID].Replicas))
+	for i, replica := range c.partitions[partitionID].Replicas {
+		metadata.Addresses[i] = c.nodes[replica].Address
+	}
+	c.mu.Unlock()
 
 	ctx.JSON(http.StatusOK, metadata)
 }
