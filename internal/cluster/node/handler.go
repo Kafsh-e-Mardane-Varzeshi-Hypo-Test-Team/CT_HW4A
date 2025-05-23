@@ -10,9 +10,15 @@ import (
 )
 
 func (n *Node) setupRoutes() {
+	// controller routes
 	n.ginEngine.POST("/add-partition/:partition-id", n.handleAddPartition)
 	n.ginEngine.DELETE("/delete-partition/:partition-id", n.handleDeletePartition)
-	// n.ginEngine.DELETE("/delete-partition", n.handleDeletePartition)
+	n.ginEngine.POST("/send-partition/:partition-id/:address", n.handleSendPartitionToNode)
+
+	// loadbalancer routes
+	n.ginEngine.POST("/partition-id/:key/:value", n.handleSetRequest)
+	n.ginEngine.GET("/partition-id/:key", n.handleGetRequest)
+	n.ginEngine.DELETE("/partition-id/:key", n.handleDeleteRequest)
 }
 
 func (n *Node) handleAddPartition(c *gin.Context) {
@@ -29,7 +35,7 @@ func (n *Node) handleAddPartition(c *gin.Context) {
 		return
 	}
 
-	n.replicas[partitionId] = replica.NewReplica(5, n.Id, partitionId, replica.Leader)
+	n.replicas[partitionId] = replica.NewReplica(n.Id, partitionId, replica.Leader)
 	c.JSON(http.StatusOK, nil)
 }
 
@@ -51,6 +57,64 @@ func (n *Node) handleDeletePartition(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
-func (n *Node) handleSendPartition() {
+func (n *Node) handleSendPartitionToNode(c *gin.Context) {
 	// TODO
+}
+
+func (n *Node) handleSetRequest(c *gin.Context) {
+	partitionId, err := strconv.Atoi(c.Param("partition-id"))
+	if err != nil {
+		log.Printf("[node.handleSetRequest] error while converting partitionId param to int: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	key := c.Param("key")
+	value := c.Param("value")
+
+	err = n.set(partitionId, -1, key, value, replica.Leader)
+	if err != nil {
+		log.Printf("[node.handleSetRequest] failed to set key '%s' in partition %d: %v", key, partitionId, err)
+		c.JSON(http.StatusNotAcceptable, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, nil)
+}
+
+func (n *Node) handleGetRequest(c *gin.Context) {
+	partitionId, err := strconv.Atoi(c.Param("partition-id"))
+	if err != nil {
+		log.Printf("[node.handleGetRequest] error while converting partitionId param to int: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	key := c.Param("key")
+
+	value, err := n.get(partitionId, key)
+	if err != nil {
+		log.Printf("[node.handleGetRequest] failed to get key '%s' from partition %d: %v", key, partitionId, err)
+		c.JSON(http.StatusNotAcceptable, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"value": value})
+}
+
+func (n *Node) handleDeleteRequest(c *gin.Context) {
+	partitionId, err := strconv.Atoi(c.Param("partition-id"))
+	if err != nil {
+		log.Printf("[node.handleDeleteRequest] error while converting partitionId param to int: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	key := c.Param("key")
+
+	err = n.delete(partitionId, -1, key, replica.Leader)
+	if err != nil {
+		log.Printf("[node.handleDeleteRequest] failed to delete key '%s' from partition %d: %v", key, partitionId, err)
+		c.JSON(http.StatusNotAcceptable, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, nil)
 }

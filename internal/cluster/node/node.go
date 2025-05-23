@@ -45,7 +45,6 @@ func (n *Node) Start() error {
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 
 	n.replicasInitialization()
-	go n.tcpListener("lb-requests-to-node"+strconv.Itoa(n.Id), n.lbConnectionHandler)           // TODO: read about this address
 	go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.nodeConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
@@ -88,34 +87,6 @@ func (n *Node) tcpListener(address string, handler func(Message) Response) {
 	}
 }
 
-func (n *Node) lbConnectionHandler(msg Message) Response {
-	switch msg.Type {
-	case Set:
-		err := n.set(msg.PartitionId, msg.Timestamp, msg.Key, msg.Value, replica.Leader)
-		if err != nil {
-			log.Printf("[node.lbConnectionHandler] failed to set key '%s' in partition %d: %v", msg.Key, msg.PartitionId, err)
-			return Response{Error: err}
-		}
-		return Response{}
-	case Get:
-		val, err := n.get(msg.PartitionId, msg.Key)
-		if err != nil {
-			log.Printf("[node.lbConnectionHandler] failed to get key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
-			return Response{Error: err}
-		}
-		return Response{Value: val}
-	case Delete:
-		err := n.delete(msg.PartitionId, msg.Timestamp, msg.Key, replica.Leader)
-		if err != nil {
-			log.Printf("[node.lbConnectionHandler] failed to delete key '%s' from partition %d: %v", msg.Key, msg.PartitionId, err)
-			return Response{Error: err}
-		}
-		return Response{}
-	default:
-		return Response{Error: fmt.Errorf("unknown message type")}
-	}
-}
-
 // This function handels requests of some node containing a leader with some follower replica in this node
 func (n *Node) nodeConnectionHandler(msg Message) Response {
 	switch msg.Type {
@@ -147,8 +118,6 @@ func (n *Node) set(partitionId int, timestamp int64, key string, value string, r
 	if r.Mode != replicaType {
 		return fmt.Errorf("[node.set] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
 	}
-
-	// TODO(me): append to WAL
 
 	replicaLog, err := r.Set(key, value, timestamp)
 	if err != nil {
@@ -219,7 +188,6 @@ func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
 	}
 
 	for _, fn := range followersNodes {
-		// TODO(discuss): ask mohammad when would I need IsAlive and ID?
 		go n.replicateToFollower(fn, msg)
 	}
 }
@@ -275,6 +243,7 @@ func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
 	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", fn.Address, maxRetries)
 }
 
+// TODO: convert to http
 func (n *Node) getNodesContainingPartition(partitionId int) ([]controller.NodeMetadata, error) {
 	conn, err := net.Dial("tcp", ":"+CONTROLLER_ADDRESS)
 	if err != nil {
@@ -318,6 +287,7 @@ func (n *Node) startHeartbeat(interval time.Duration) {
 	}()
 }
 
+// TODO: convert to http
 func (n *Node) sendHeartbeat() error {
 	conn, err := net.Dial("tcp", CONTROLLER_ADDRESS)
 	if err != nil {
