@@ -8,6 +8,7 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o cmd/client/main ./cmd/client/main.go
+RUN go build -o client ./cmd/client/main.go
 
 CMD ["/app/cmd/client/main"]
+ENTRYPOINT ["./client" ]
