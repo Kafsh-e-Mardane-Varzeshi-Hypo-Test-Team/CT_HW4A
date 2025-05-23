@@ -6,8 +6,8 @@ import (
 )
 
 func TestNewReplicaInitialization(t *testing.T) {
-	rep := NewReplica(1, 2, 3, Follower)
-	if rep.Id != 1 || rep.NodeId != 2 || rep.PartitionId != 3 || rep.Mode != Follower {
+	rep := NewReplica(2, 3, Follower)
+	if rep.NodeId != 2 || rep.PartitionId != 3 || rep.Mode != Follower {
 		t.Errorf("Replica initialized incorrectly: %+v", rep)
 	}
 	if rep.lsm == nil || rep.data == nil {
@@ -15,7 +15,7 @@ func TestNewReplicaInitialization(t *testing.T) {
 	}
 }
 func TestLeaderSetGetDelete(t *testing.T) {
-	rep := NewReplica(1, 2, 3, Leader)
+	rep := NewReplica(2, 3, Leader)
 
 	// Set
 	log, err := rep.Set("foo", "bar", -1)
@@ -50,7 +50,7 @@ func TestLeaderSetGetDelete(t *testing.T) {
 	}
 }
 func TestFollowerSetConflict(t *testing.T) {
-	rep := NewReplica(1, 2, 3, Follower)
+	rep := NewReplica(2, 3, Follower)
 
 	// First set
 	_, err := rep.Set("x", "val1", 100)
@@ -65,7 +65,7 @@ func TestFollowerSetConflict(t *testing.T) {
 	}
 }
 func TestFollowerDeleteConflict(t *testing.T) {
-	rep := NewReplica(1, 2, 3, Follower)
+	rep := NewReplica(2, 3, Follower)
 
 	// Initial set
 	_, err := rep.Set("y", "val1", 100)
@@ -80,7 +80,7 @@ func TestFollowerDeleteConflict(t *testing.T) {
 	}
 }
 func TestReplicaModeTransition(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Follower)
+	rep := NewReplica(1, 1, Follower)
 
 	rep.ConvertToLeader()
 	if rep.Mode != Leader {
@@ -93,13 +93,13 @@ func TestReplicaModeTransition(t *testing.T) {
 	}
 }
 func TestSnapshotRoundTrip(t *testing.T) {
-	leader := NewReplica(1, 1, 1, Leader)
+	leader := NewReplica(1, 1, Leader)
 	leader.Set("a", "apple", -1)
 	leader.Set("b", "banana", -1)
 	snapshot := leader.GetSnapshot()
 
 	// New follower receives snapshot
-	follower := NewReplica(2, 1, 1, Follower)
+	follower := NewReplica(1, 1, Follower)
 	follower.ReceiveSnapshot(snapshot)
 
 	logEntry, err := follower.Get("a")
@@ -108,7 +108,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 }
 func TestApplyLogEntryRespectsTimestamps(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Follower)
+	rep := NewReplica(1, 1, Follower)
 
 	// Apply newer first
 	rep.ApplyLogEntry(ReplicaLog{Key: "k", Value: "new", Timestamp: 100, Action: ReplicaActionSet})
@@ -125,7 +125,7 @@ func TestApplyLogEntryRespectsTimestamps(t *testing.T) {
 //
 
 func TestGetNonexistentKey(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Follower)
+	rep := NewReplica(1, 1, Follower)
 
 	_, err := rep.Get("missing")
 	if err == nil {
@@ -134,7 +134,7 @@ func TestGetNonexistentKey(t *testing.T) {
 }
 
 func TestDeleteNonexistentKey(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Leader)
+	rep := NewReplica(1, 1, Leader)
 
 	_, err := rep.Delete("ghost", -1)
 	if err == nil {
@@ -142,14 +142,14 @@ func TestDeleteNonexistentKey(t *testing.T) {
 	}
 }
 func TestSnapshotEmptyReplica(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Leader)
+	rep := NewReplica(1, 1, Leader)
 
 	snap := rep.GetSnapshot()
 	if len(snap.Tables) != 0 {
 		t.Errorf("Expected 0 tables in snapshot, got %d", len(snap.Tables))
 	}
 
-	newRep := NewReplica(2, 1, 1, Follower)
+	newRep := NewReplica(1, 1, Follower)
 	newRep.ReceiveSnapshot(snap)
 
 	if len(newRep.data) != 0 {
@@ -157,13 +157,13 @@ func TestSnapshotEmptyReplica(t *testing.T) {
 	}
 }
 func TestSnapshotWithMixedLogEntries(t *testing.T) {
-	leader := NewReplica(1, 1, 1, Leader)
+	leader := NewReplica(1, 1, Leader)
 	leader.Set("x", "123", -1)
 	leader.Set("y", "456", -1)
 	leader.Delete("x", -1)
 
 	snap := leader.GetSnapshot()
-	follower := NewReplica(2, 1, 1, Follower)
+	follower := NewReplica(1, 1, Follower)
 	follower.ReceiveSnapshot(snap)
 
 	_, err := follower.Get("x")
@@ -176,7 +176,7 @@ func TestSnapshotWithMixedLogEntries(t *testing.T) {
 	}
 }
 func TestFollowerSetSameTimestamp(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Follower)
+	rep := NewReplica(1, 1, Follower)
 
 	_, err := rep.Set("dup", "one", 10)
 	if err != nil {
@@ -188,7 +188,7 @@ func TestFollowerSetSameTimestamp(t *testing.T) {
 	}
 }
 func TestDoubleConvertToLeader(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Follower)
+	rep := NewReplica(1, 1, Follower)
 	rep.Set("a", "alpha", 100)
 
 	rep.ConvertToLeader()
@@ -200,7 +200,7 @@ func TestDoubleConvertToLeader(t *testing.T) {
 	}
 }
 func TestConcurrentAccess(t *testing.T) {
-	rep := NewReplica(1, 1, 1, Leader)
+	rep := NewReplica(1, 1, Leader)
 
 	done := make(chan bool)
 

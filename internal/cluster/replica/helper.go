@@ -13,7 +13,6 @@ const (
 type ReplicaLog struct {
 	PartitionId int
 	NodeId      int
-	ReplicaId   int
 	Action      ReplicaAction
 	Timestamp   int64
 	Key         string
@@ -38,7 +37,6 @@ func (l *ReplicaLog) String() string {
 	return "ReplicaLog{" +
 		"PartitionId: " + strconv.FormatInt(int64(l.PartitionId), 10) +
 		", NodeId: " + strconv.FormatInt(int64(l.NodeId), 10) +
-		", ReplicaId: " + strconv.FormatInt(int64(l.ReplicaId), 10) +
 		", Action: " + action +
 		", Timestamp: " + strconv.FormatInt(l.Timestamp, 10) +
 		", Key: " + l.Key +

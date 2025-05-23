@@ -14,7 +14,6 @@ const (
 )
 
 type Replica struct {
-	Id          int
 	NodeId      int
 	PartitionId int
 	Mode        ReplicaType
@@ -25,9 +24,8 @@ type Replica struct {
 	mu        sync.RWMutex
 }
 
-func NewReplica(id, nodeId, partitionId int, mode ReplicaType) *Replica {
+func NewReplica(nodeId, partitionId int, mode ReplicaType) *Replica {
 	return &Replica{
-		Id:          id,
 		NodeId:      nodeId,
 		PartitionId: partitionId,
 		Mode:        mode,
@@ -69,7 +67,6 @@ func (r *Replica) Set(key, value string, timestamp int64) (ReplicaLog, error) {
 	logEntry := ReplicaLog{
 		PartitionId: r.PartitionId,
 		NodeId:      r.NodeId,
-		ReplicaId:   r.Id,
 		Action:      ReplicaActionSet,
 		Timestamp:   ts,
 		Key:         key,
@@ -98,7 +95,6 @@ func (r *Replica) Get(key string) (ReplicaLog, error) {
 	logEntry := ReplicaLog{
 		PartitionId: r.PartitionId,
 		NodeId:      r.NodeId,
-		ReplicaId:   r.Id,
 		Action:      ReplicaActionGet,
 		Timestamp:   -1,
 		Key:         key,
@@ -144,7 +140,6 @@ func (r *Replica) Delete(key string, timestamp int64) (ReplicaLog, error) {
 	logEntry := ReplicaLog{
 		PartitionId: r.PartitionId,
 		NodeId:      r.NodeId,
-		ReplicaId:   r.Id,
 		Action:      ReplicaActionDelete,
 		Timestamp:   ts,
 		Key:         key,
@@ -211,7 +206,7 @@ func (r *Replica) ReceiveSnapshot(snapshot *Snapshot) {
 	}
 
 	// log number of data entries after applying snapshot
-	log.Printf("Replica %d applied snapshot resulting in %d data entries\n", r.Id, len(r.data))
+	log.Printf("Node %d, partition %d applied snapshot resulting in %d data entries\n", r.NodeId, r.PartitionId, len(r.data))
 
 	r.lsm.mem = NewMemTable()
 }
