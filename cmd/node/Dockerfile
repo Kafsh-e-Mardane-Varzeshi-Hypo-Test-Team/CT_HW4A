@@ -4,13 +4,13 @@ WORKDIR /app
 
 COPY go.mod ./
 COPY go.sum ./
-
 RUN go mod download
 
-COPY ./internal/cluster/ .
+COPY . .
 
-RUN go build -o /app/cmd/main ./cmd/main.go
+RUN go build -o cmd/node/main ./cmd/node/main.go
 
-EXPOSE 3001
+EXPOSE 8000
+EXPOSE 9000
 
-CMD [ "/app/cmd/main" ]
+CMD ["/app/cmd/node/main"]
