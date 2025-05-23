@@ -17,7 +17,7 @@ import (
 type Controller struct {
 	dockerClient      *docker.DockerClient
 	ginEngine         *gin.Engine
-	mu                sync.Mutex
+	mu                sync.RWMutex
 	partitionCount    int
 	replicationFactor int
 	nodes             map[int]*NodeMetadata
@@ -72,6 +72,10 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		log.Printf("controller::RegisterNode: Node %d already exists.\n", nodeID)
 		return errors.New("node already exists")
 	}
+	c.nodes[nodeID] = &NodeMetadata{
+		ID:     nodeID,
+		Status: Creating,
+	}
 	c.mu.Unlock()
 
 	// Create a new docker container for the node
@@ -92,11 +96,9 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	}
 
 	c.mu.Lock()
-	c.nodes[nodeID] = &NodeMetadata{
-		ID:      nodeID,
-		Address: nodeName,
-		Status:  Creating,
-	}
+	node := c.nodes[nodeID]
+	node.Address = nodeName
+	node.Status = Syncing
 	c.mu.Unlock()
 
 	go c.makeNodeReady(nodeID)
@@ -149,15 +151,4 @@ func (c *Controller) replicate(partitionID, nodeID int) {
 	// add nodeID to partition
 
 	log.Printf("controller::replicate: Partition %d replicated to node %d\n", partitionID, nodeID)
-}
-
-func (c *Controller) waitForNodeReady() error {
-	/* timeout := time.Minute
-	checkInterval := 5 * time.Second
-	startTime := time.Now() */
-
-	// TODO: request to the new node to check if it is ready
-	// retry mechanism
-
-	return errors.New("timeout waiting for node to become ready for partition")
 }
