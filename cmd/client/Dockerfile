@@ -10,5 +10,5 @@ COPY . .
 
 RUN go build -o client ./cmd/client/main.go
 
-CMD ["/app/cmd/client/main"]
+CMD ["--help"]
 ENTRYPOINT ["./client" ]
