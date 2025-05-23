@@ -16,7 +16,7 @@ import (
 const (
 	REQUEST_TIMEOUT = 2 * time.Second
 	HEARTBEAT_TIMER = 2 * time.Second
-	HTTP_ADDRESS    = "8000"
+	HTTP_ADDRESS    = "0.0.0.0:8000"
 	TCP_ADDRESS     = "0.0.0.0:9000"
 )
 

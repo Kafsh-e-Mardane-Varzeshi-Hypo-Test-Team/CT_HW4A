@@ -167,7 +167,6 @@ func (c *Controller) replicate(partitionID, nodeID int) error {
 		c.mu.Unlock()
 
 		resp, err := c.doNodeRequest("POST", addr)
-		fmt.Println(resp, err)
 		if err != nil {
 			log.Printf("controller::replicate: Failed to add partition %d to node %d: %v\n", partitionID, nodeID, err)
 			return errors.New("failed to add partition")

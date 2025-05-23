@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -53,6 +54,8 @@ func (d *DockerClient) CreateNodeContainer(imageName string, nodeID int, network
 		return errors.New("failed to start node container")
 	}
 	log.Printf("docker::CreateNodeContainer: %s started successfully\n", nodeName)
+
+	time.Sleep(5 * time.Second)
 
 	d.respIDs[nodeName] = resp.ID
 	return nil
