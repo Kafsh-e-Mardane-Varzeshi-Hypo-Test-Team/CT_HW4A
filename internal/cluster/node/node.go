@@ -15,7 +15,8 @@ import (
 const (
 	REQUEST_TIMEOUT = 2 * time.Second
 	HEARTBEAT_TIMER = 2 * time.Second
-	NODE_ADDRESS = "0.0.0.0:9000"
+	HTTP_ADDRESS    = "8000"
+	TCP_ADDRESS     = "0.0.0.0:9000"
 )
 
 type Node struct {
@@ -26,12 +27,12 @@ type Node struct {
 	httpClient *http.Client
 }
 
-func NewNode(id int) Node {
+func NewNode(id int) *Node {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	return Node{
+	return &Node{
 		Id:        id,
 		replicas:  make(map[int]*replica.Replica),
 		ginEngine: router,
@@ -46,24 +47,20 @@ func NewNode(id int) Node {
 	}
 }
 
-func (n *Node) Start() error {
-	err := n.loadConfig()
-	if err != nil {
-		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
-	}
+func (n *Node) Start() {
 	n.setupRoutes()
+	n.ginEngine.Run(HTTP_ADDRESS)
+	
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 	go n.tcpListener(n.nodeConnectionHandler)
-	return nil
 }
 
 func (n *Node) tcpListener(handler func(Message) Response) {
-	ln, err := net.Listen("tcp", NODE_ADDRESS)
+	ln, err := net.Listen("tcp", TCP_ADDRESS)
 	if err != nil {
-		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", NODE_ADDRESS, err)
-		return
+		log.Fatalf("[node.tcpListener] Node failed to listen on address %s: %v", TCP_ADDRESS, err)
 	}
-	log.Printf("[node.tcpListener] Listening on address %s", NODE_ADDRESS)
+	log.Printf("[node.tcpListener] Listening on address %s", TCP_ADDRESS)
 
 	for {
 		conn, err := ln.Accept()
@@ -85,6 +82,7 @@ func (n *Node) tcpListener(handler func(Message) Response) {
 			resp := handler(msg)
 			if err := encoder.Encode(resp); err != nil {
 				log.Printf("[node.tcpListener] Failed to send response: %v", err)
+				return
 			}
 		}(conn)
 	}
@@ -242,11 +240,6 @@ func (n *Node) replicateToFollower(address string, msg Message) {
 	}
 
 	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", address, maxRetries)
-}
-
-func (n *Node) loadConfig() error {
-	// TODO
-	return nil
 }
 
 func (n *Node) startHeartbeat(interval time.Duration) {

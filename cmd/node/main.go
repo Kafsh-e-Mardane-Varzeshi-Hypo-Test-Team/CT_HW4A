@@ -9,13 +9,21 @@ import (
 )
 
 func main() {
+	err := loadConfig()
+	if err != nil {
+		log.Fatalf("[node.Start] can not load config due to: %v", err)
+	}
+
 	id, err := strconv.Atoi(os.Getenv("NODE-ID"))
 	if err != nil {
 		log.Fatalf("[main (node)] failed to get 'NODE-ID' env variable: %v", err)
 	}
 
 	n := node.NewNode(id)
-	if err := n.Start(); err != nil {
-		log.Fatalf("[main (node)] failed to start node: %v", err)
-	}
+	n.Start()
+}
+
+func loadConfig() error {
+	// TODO
+	return nil
 }
