@@ -10,7 +10,6 @@ COPY . .
 
 RUN go build -o cmd/loadbalancer/main ./cmd/loadbalancer/main.go
 
-EXPOSE 8080
 EXPOSE 9001
 
 CMD ["/app/cmd/loadbalancer/main"]

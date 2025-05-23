@@ -9,7 +9,7 @@ import (
 func main() {
 	lb := loadbalancer.NewLoadBalancer("controller:8080")
 
-	if err := lb.Run(":8080"); err != nil {
+	if err := lb.Run(":9001"); err != nil {
 		log.Fatalf("Failed to start load balancer: %v", err)
 	}
 }
