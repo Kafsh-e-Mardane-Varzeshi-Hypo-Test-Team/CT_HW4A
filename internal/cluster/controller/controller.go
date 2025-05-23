@@ -7,7 +7,6 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -82,14 +81,13 @@ func (c *Controller) RegisterNode(nodeID int) error {
 
 	// Create a new docker container for the node
 	imageName := c.nodeImage
-	nodeName := "node-" + strconv.Itoa(nodeID)
 	networkName := c.networkName
-	tcpPort := "8080"
-	httpPort := "8080"
+	tcpPort := "9000"
+	httpPort := "8000"
 
 	err := c.dockerClient.CreateNodeContainer(
 		imageName,
-		nodeName,
+		nodeID,
 		networkName,
 		nat.Port(tcpPort),
 		nat.Port(httpPort),

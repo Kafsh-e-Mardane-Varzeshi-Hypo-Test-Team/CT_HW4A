@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strconv"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -25,14 +26,18 @@ func NewDockerClient() (*DockerClient, error) {
 	return &DockerClient{cli: cli, respIDs: make(map[string]string)}, nil
 }
 
-func (d *DockerClient) CreateNodeContainer(imageName, nodeName, networkName string, tcpPort nat.Port, httpPort nat.Port) error {
+func (d *DockerClient) CreateNodeContainer(imageName string, nodeID int, networkName string, tcpPort nat.Port, httpPort nat.Port) error {
 	ctx := context.Background()
+	nodeName := "node-" + strconv.Itoa(nodeID)
 
 	resp, err := d.cli.ContainerCreate(ctx, &container.Config{
 		Image: imageName,
 		ExposedPorts: nat.PortSet{
 			tcpPort:  {},
 			httpPort: {},
+		},
+		Env: []string{
+			"NODE-ID=" + strconv.Itoa(nodeID),
 		},
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(networkName),
