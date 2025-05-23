@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
@@ -23,8 +24,9 @@ type Node struct {
 	Id       int
 	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
 
-	ginEngine  *gin.Engine
-	httpClient *http.Client
+	replicasMapMutex sync.RWMutex
+	ginEngine        *gin.Engine
+	httpClient       *http.Client
 }
 
 func NewNode(id int) *Node {
@@ -33,9 +35,10 @@ func NewNode(id int) *Node {
 	router.Use(gin.Recovery())
 
 	return &Node{
-		Id:        id,
-		replicas:  make(map[int]*replica.Replica),
-		ginEngine: router,
+		Id:               id,
+		replicas:         make(map[int]*replica.Replica),
+		replicasMapMutex: sync.RWMutex{},
+		ginEngine:        router,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: &http.Transport{
@@ -119,7 +122,9 @@ func (n *Node) nodeConnectionHandler(msg Message) Response {
 }
 
 func (n *Node) set(partitionId int, timestamp int64, key string, value string, replicaType replica.ReplicaType) error {
+	n.replicasMapMutex.RLock()
 	r, ok := n.replicas[partitionId]
+	n.replicasMapMutex.RUnlock()
 	if !ok {
 		return fmt.Errorf("[node.set] node id: %v contains no partition containing key:%s", n.Id, key)
 	}
@@ -140,7 +145,9 @@ func (n *Node) set(partitionId int, timestamp int64, key string, value string, r
 }
 
 func (n *Node) get(partitionId int, key string) (string, error) {
+	n.replicasMapMutex.RLock()
 	r, ok := n.replicas[partitionId]
+	n.replicasMapMutex.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("[node.get] node id: %v contains no partition containing key:%s", n.Id, key)
 	}
@@ -154,7 +161,9 @@ func (n *Node) get(partitionId int, key string) (string, error) {
 }
 
 func (n *Node) delete(partitionId int, timestamp int64, key string, replicaType replica.ReplicaType) error {
+	n.replicasMapMutex.RLock()
 	r, ok := n.replicas[partitionId]
+	n.replicasMapMutex.RUnlock()
 	if !ok {
 		return fmt.Errorf("[node.delete] node id: %v contains no partition containing key:%s", n.Id, key)
 	}
@@ -263,15 +272,22 @@ func (n *Node) startHeartbeat(interval time.Duration) {
 	}()
 }
 
-func (n *Node) SendSnapshotToNode(originReplica *replica.Replica, address string) error {
-	snapshot := originReplica.GetSnapshot()
-	if snapshot == nil {
-		return fmt.Errorf("failed to get snapshot for partition %d", originReplica.PartitionId)
+func (n *Node) sendSnapshotToNode(partitionId int, address string) error {
+	n.replicasMapMutex.RLock()
+	replica, exists := n.replicas[partitionId]
+	if !exists {
+		return fmt.Errorf("partition %d not found", partitionId)
 	}
+
+	snapshot := replica.GetSnapshot()
+	if snapshot == nil {
+		return fmt.Errorf("failed to get snapshot for partition %d", partitionId)
+	}
+	n.replicasMapMutex.RUnlock()
 
 	msg := Message{
 		Type:        Snapshot,
-		PartitionId: originReplica.PartitionId,
+		PartitionId: replica.PartitionId,
 		Snapshot:    *snapshot,
 	}
 
@@ -280,6 +296,6 @@ func (n *Node) SendSnapshotToNode(originReplica *replica.Replica, address string
 	if err != nil {
 		return err
 	}
-	log.Printf("[node.SendSnapshotToNode] successfully sent snapshot of partition %d to %s", originReplica.PartitionId, address)
+	log.Printf("[node.SendSnapshotToNode] successfully sent snapshot of partition %d to %s", partitionId, address)
 	return nil
 }

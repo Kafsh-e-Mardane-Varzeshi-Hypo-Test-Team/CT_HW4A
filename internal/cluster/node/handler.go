@@ -33,6 +33,7 @@ func (n *Node) handleAddPartition(c *gin.Context) {
 		return
 	}
 
+	n.replicasMapMutex.Lock()
 	if _, ok := n.replicas[partitionId]; ok {
 		log.Printf("[node.handleAddPartition] partitionId %v already exists in nodeId %v", partitionId, n.Id)
 		c.JSON(http.StatusConflict, gin.H{"error": "this partitionId already exists"})
@@ -40,6 +41,7 @@ func (n *Node) handleAddPartition(c *gin.Context) {
 	}
 
 	n.replicas[partitionId] = replica.NewReplica(n.Id, partitionId, replica.Leader)
+	n.replicasMapMutex.Unlock()
 	c.JSON(http.StatusOK, nil)
 }
 
@@ -51,15 +53,15 @@ func (n *Node) handleDeletePartition(c *gin.Context) {
 		return
 	}
 
+	n.replicasMapMutex.Lock()
 	if _, ok := n.replicas[partitionId]; !ok {
 		log.Printf("[node.handleDeletePartition] partitionId %v does not exist in nodeId %v", partitionId, n.Id)
 		c.JSON(http.StatusNotFound, gin.H{"error": "this partitionId does not exist"})
 		return
 	}
 
-	// Possibly done like this so that concurrent requests to the same partitionId are handled correctly
-	// TODO: Ask Parisa on this
-	n.replicas[partitionId] = nil
+	delete(n.replicas, partitionId)
+	n.replicasMapMutex.Unlock()
 	c.JSON(http.StatusOK, nil)
 }
 
@@ -78,14 +80,7 @@ func (n *Node) handleSendPartitionToNode(c *gin.Context) {
 		return
 	}
 
-	replica, ok := n.replicas[partitionId]
-	if !ok {
-		log.Printf("[node.handleSendPartitionToNode] partitionId %v does not exist in nodeId %v", partitionId, n.Id)
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Errorf("partitionId %v does not exist", partitionId)})
-		return
-	}
-
-	if err := n.SendSnapshotToNode(replica, address); err != nil {
+	if err := n.sendSnapshotToNode(partitionId, address); err != nil {
 		log.Printf("[node.handleSendPartitionToNode] %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
