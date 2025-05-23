@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
 )
@@ -54,6 +53,7 @@ func (n *Node) Start() error {
 	if err != nil {
 		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
 	}
+	n.setupRoutes()
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 	go n.tcpListener(n.nodeConnectionHandler)
 	return nil
@@ -185,23 +185,23 @@ func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
 		msg.Type = Delete
 	}
 
-	followersNodes, err := n.getNodesContainingPartition(replicaLog.PartitionId)
+	followersNodesAddresses, err := n.getNodesContainingPartition(replicaLog.PartitionId)
 	if err != nil {
 		log.Printf("[node.broadcastToFollowers] failed get nodes containing partitionId: %d from controller: %v", replicaLog.PartitionId, err)
 	}
 
-	for _, fn := range followersNodes {
-		go n.replicateToFollower(fn, msg)
+	for _, address := range followersNodesAddresses {
+		go n.replicateToFollower(address, msg)
 	}
 }
 
-func (n *Node) replicateToFollower(fn *controller.NodeMetadata, msg Message) {
+func (n *Node) replicateToFollower(address string, msg Message) {
 	maxRetries := 3
 	retryDelay := 100 * time.Millisecond
 	for i := 0; i < maxRetries; i++ {
-		conn, err := net.Dial("tcp", ":"+fn.Address)
+		conn, err := net.Dial("tcp", ":"+address)
 		if err != nil {
-			log.Printf("[node.replicateToFollower] failed to connect to %s: %v", fn.Address, err)
+			log.Printf("[node.replicateToFollower] failed to connect to %s: %v", address, err)
 			time.Sleep(retryDelay)
 			continue
 		}
@@ -234,16 +234,16 @@ func (n *Node) replicateToFollower(fn *controller.NodeMetadata, msg Message) {
 		conn.Close()
 
 		if resp.Error != nil {
-			log.Printf("[node.replicateToFollower] follower at %s responded with error: %s", fn.Address, resp.Error)
+			log.Printf("[node.replicateToFollower] follower at %s responded with error: %s", address, resp.Error)
 			time.Sleep(retryDelay)
 			continue
 		}
 
-		log.Printf("[node.replicateToFollower] successfully replicated to %s", fn.Address)
+		log.Printf("[node.replicateToFollower] successfully replicated to %s", address)
 		return
 	}
 
-	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", fn.Address, maxRetries)
+	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", address, maxRetries)
 }
 
 func (n *Node) loadConfig() error {

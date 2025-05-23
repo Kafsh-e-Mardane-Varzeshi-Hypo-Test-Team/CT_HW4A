@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
 )
@@ -124,7 +123,7 @@ func (n *Node) handleDeleteRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
-func (n *Node) getNodesContainingPartition(partitionId int) ([]*controller.NodeMetadata, error) {
+func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), REQUEST_TIMEOUT)
 	defer cancel()
 
@@ -148,14 +147,14 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]*controller.NodeM
 	}
 
 	metadata := struct {
-		Partitions []*controller.NodeMetadata `json:"partitions"`
+		Addresses []string `json:"addresses"`
 	}{}
 	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
 		log.Printf("[node.getNodesContainingPartition] failed to decode response: %v", err)
 		return nil, err
 	}
 
-	return metadata.Partitions, nil
+	return metadata.Addresses, nil
 }
 
 func (n *Node) sendHeartbeat() error {
