@@ -60,3 +60,28 @@ func (d *DockerClient) CreateNodeContainer(imageName string, nodeID int, network
 	d.respIDs[nodeName] = resp.ID
 	return nil
 }
+
+func (d *DockerClient) RemoveNodeContainer(nodeID int) error {
+	ctx := context.Background()
+	nodeName := "node-" + strconv.Itoa(nodeID)
+
+	if _, exists := d.respIDs[nodeName]; !exists {
+		log.Printf("docker::RemoveNodeContainer: Container %s does not exist\n", nodeName)
+		return errors.New("container does not exist")
+	}
+
+	if err := d.cli.ContainerStop(ctx, d.respIDs[nodeName], container.StopOptions{}); err != nil {
+		log.Printf("docker::RemoveNodeContainer: Failed to stop container %s\n", nodeName)
+		return errors.New("failed to stop node container")
+	}
+	log.Printf("docker::RemoveNodeContainer: %s stopped successfully\n", nodeName)
+
+	if err := d.cli.ContainerRemove(ctx, d.respIDs[nodeName], container.RemoveOptions{Force: true}); err != nil {
+		log.Printf("docker::RemoveNodeContainer: Failed to remove container %s\n", nodeName)
+		return errors.New("failed to remove node container")
+	}
+	log.Printf("docker::RemoveNodeContainer: %s removed successfully\n", nodeName)
+
+	delete(d.respIDs, nodeName)
+	return nil
+}
