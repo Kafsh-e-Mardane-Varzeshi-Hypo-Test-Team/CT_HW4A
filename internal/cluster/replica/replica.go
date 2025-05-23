@@ -158,24 +158,26 @@ func (r *Replica) Delete(key string, timestamp int64) (ReplicaLog, error) {
 func (r *Replica) ConvertToLeader() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.Mode == Leader {
-		return
+	if r.Mode != Leader {
+		r.Mode = Leader
+		r.timestamp = 0
+		r.lsm.mu.Lock()
+		defer r.lsm.mu.Unlock()
+		r.lsm = NewLSM()
 	}
-	r.Mode = Leader
-	r.timestamp = 0
-	r.lsm.mu.Lock()
-	defer r.lsm.mu.Unlock()
-	r.lsm = NewLSM()
 }
 
 func (r *Replica) ConvertToFollower() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.Mode = Follower
 	r.timestamp = 0
+	r.mu.Unlock()
+
 	r.lsm.mu.Lock()
 	defer r.lsm.mu.Unlock()
-	r.lsm = NewLSM()
+	r.lsm = NewLSM() // reset LSM, lock is held for previous LSM
+	r.copyDataToLSM()
+	r.lsm.flush()
 }
 
 func (r *Replica) modePrefix() string {
@@ -186,29 +188,28 @@ func (r *Replica) modePrefix() string {
 }
 
 func (r *Replica) ReceiveSnapshot(snapshot *Snapshot) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.Mode == Follower {
+		r.mu.Lock()
+		defer r.mu.Unlock()
 
-	r.lsm.mu.Lock()
-	defer r.lsm.mu.Unlock()
+		r.lsm.mu.Lock()
+		defer r.lsm.mu.Unlock()
 
-	r.lsm.immutables = make([]*MemTable, len(snapshot.Tables))
-	for i := range snapshot.Tables {
-		r.lsm.immutables[i] = &snapshot.Tables[i]
-	}
+		r.lsm.immutables = []*MemTable{}
 
-	// apply data from snapshot
-	r.data = make(map[string]ReplicaData)
-	for _, table := range snapshot.Tables {
-		for _, logEntry := range table.data {
-			r.ApplyLogEntry(logEntry)
+		// apply data from snapshot
+		r.data = make(map[string]ReplicaData)
+		for _, table := range snapshot.Tables {
+			for _, logEntry := range table.data {
+				r.applyLogEntry(logEntry)
+			}
 		}
+
+		// log number of data entries after applying snapshot
+		log.Printf("Node %d, partition %d applied snapshot resulting in %d data entries\n", r.NodeId, r.PartitionId, len(r.data))
+
+		r.lsm.mem = NewMemTable()
 	}
-
-	// log number of data entries after applying snapshot
-	log.Printf("Node %d, partition %d applied snapshot resulting in %d data entries\n", r.NodeId, r.PartitionId, len(r.data))
-
-	r.lsm.mem = NewMemTable()
 }
 
 func (r *Replica) GetSnapshot() *Snapshot {
@@ -235,8 +236,29 @@ func (r *Replica) GetSnapshot() *Snapshot {
 	return snapshot
 }
 
+func (r *Replica) copyDataToLSM() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Lock is held in AddLogEntry
+	// r.lsm.mu.Lock()
+	// defer r.lsm.mu.Unlock()
+
+	for key, data := range r.data {
+		logEntry := ReplicaLog{
+			PartitionId: r.PartitionId,
+			NodeId:      r.NodeId,
+			Action:      ReplicaActionSet,
+			Timestamp:   data.Timestamp,
+			Key:         key,
+			Value:       data.Value,
+		}
+		r.lsm.AddLogEntry(logEntry)
+	}
+}
+
 // does NOT acquire lock. assumes caller has already acquired the lock.
-func (r *Replica) ApplyLogEntry(logEntry ReplicaLog) {
+func (r *Replica) applyLogEntry(logEntry ReplicaLog) {
 	if logEntry.Action == ReplicaActionSet {
 		if currentData, exists := r.data[logEntry.Key]; !exists || currentData.Timestamp < logEntry.Timestamp {
 			data := ReplicaData{

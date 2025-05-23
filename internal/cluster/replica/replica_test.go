@@ -111,10 +111,10 @@ func TestApplyLogEntryRespectsTimestamps(t *testing.T) {
 	rep := NewReplica(1, 1, Follower)
 
 	// Apply newer first
-	rep.ApplyLogEntry(ReplicaLog{Key: "k", Value: "new", Timestamp: 100, Action: ReplicaActionSet})
+	rep.applyLogEntry(ReplicaLog{Key: "k", Value: "new", Timestamp: 100, Action: ReplicaActionSet})
 
 	// Attempt older
-	rep.ApplyLogEntry(ReplicaLog{Key: "k", Value: "old", Timestamp: 50, Action: ReplicaActionSet})
+	rep.applyLogEntry(ReplicaLog{Key: "k", Value: "old", Timestamp: 50, Action: ReplicaActionSet})
 
 	val, _ := rep.Get("k")
 	if val.Value != "new" {
