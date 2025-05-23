@@ -30,8 +30,8 @@ func NewNode(id int) Node {
 	router.Use(gin.Recovery())
 
 	return Node{
-		Id:       id,
-		replicas: make(map[int]*replica.Replica),
+		Id:        id,
+		replicas:  make(map[int]*replica.Replica),
 		ginEngine: router,
 	}
 	// TODO: run node.start node in main.go file of container
@@ -44,14 +44,9 @@ func (n *Node) Start() error {
 	}
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 
-	n.replicasInitialization()
 	go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.nodeConnectionHandler) // TODO: read about this address
 	// TODO: other tcp listeners
 	return nil
-}
-
-func (n *Node) replicasInitialization() {
-	// TODO
 }
 
 func (n *Node) tcpListener(address string, handler func(Message) Response) {
