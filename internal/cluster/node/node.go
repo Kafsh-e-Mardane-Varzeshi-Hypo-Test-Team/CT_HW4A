@@ -15,13 +15,13 @@ import (
 const (
 	REQUEST_TIMEOUT = 2 * time.Second
 	HEARTBEAT_TIMER = 2 * time.Second
+	NODE_ADDRESS = "0.0.0.0:9000"
 )
 
 type Node struct {
 	Id       int
 	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
 
-	address    string
 	ginEngine  *gin.Engine
 	httpClient *http.Client
 }
@@ -34,7 +34,6 @@ func NewNode(id int) Node {
 	return Node{
 		Id:        id,
 		replicas:  make(map[int]*replica.Replica),
-		address:   fmt.Sprintf("node-%d", id),
 		ginEngine: router,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -45,7 +44,6 @@ func NewNode(id int) Node {
 			},
 		},
 	}
-	// TODO: run node.start node in main.go file of container
 }
 
 func (n *Node) Start() error {
@@ -60,12 +58,12 @@ func (n *Node) Start() error {
 }
 
 func (n *Node) tcpListener(handler func(Message) Response) {
-	ln, err := net.Listen("tcp", n.address)
+	ln, err := net.Listen("tcp", NODE_ADDRESS)
 	if err != nil {
-		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", n.address, err)
+		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", NODE_ADDRESS, err)
 		return
 	}
-	log.Printf("[node.tcpListener] Listening on address %s", n.address)
+	log.Printf("[node.tcpListener] Listening on address %s", NODE_ADDRESS)
 
 	for {
 		conn, err := ln.Accept()
@@ -199,7 +197,7 @@ func (n *Node) replicateToFollower(address string, msg Message) {
 	maxRetries := 3
 	retryDelay := 100 * time.Millisecond
 	for i := 0; i < maxRetries; i++ {
-		conn, err := net.Dial("tcp", ":"+address)
+		conn, err := net.Dial("tcp", address)
 		if err != nil {
 			log.Printf("[node.replicateToFollower] failed to connect to %s: %v", address, err)
 			time.Sleep(retryDelay)
