@@ -264,28 +264,3 @@ func (n *Node) startHeartbeat(interval time.Duration) {
 		}
 	}()
 }
-
-// TODO: convert to http
-func (n *Node) sendHeartbeat() error {
-	conn, err := net.Dial("tcp", CONTROLLER_ADDRESS)
-	if err != nil {
-		return fmt.Errorf("failed to connect to controller at %s: %v", CONTROLLER_ADDRESS, err)
-	}
-	defer conn.Close()
-
-	encoder := gob.NewEncoder(conn)
-
-	if err := encoder.Encode("Heartbeat-From-Node"); err != nil {
-		return fmt.Errorf("failed to encode heartbeat message type: %v", err)
-	}
-
-	hb := Heartbeat{
-		NodeId:    n.Id,
-		Timestamp: time.Now().Unix(),
-	}
-	if err := encoder.Encode(hb); err != nil {
-		return fmt.Errorf("failed to encode heartbeat payload: %v", err)
-	}
-
-	return nil
-}

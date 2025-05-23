@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -156,4 +157,27 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]*controller.NodeM
 	}
 
 	return metadata.Partitions, nil
+}
+
+func (n *Node) sendHeartbeat() error {
+	hb := Heartbeat{
+		NodeId: n.Id,
+	}
+
+	body, err := json.Marshal(hb)
+	if err != nil {
+		return fmt.Errorf("[node.sendHeartbeat] failed to marshal heartbeat: %v", err)
+	}
+
+	resp, err := http.Post("controller/node-heartbeat", "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("[node.sendHeartbeat] failed to send heartbeat: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("[node.sendHeartbeat] controller returned non-OK status: %v", resp.Status)
+	}
+
+	return nil
 }
