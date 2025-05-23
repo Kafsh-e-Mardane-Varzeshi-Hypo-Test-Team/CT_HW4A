@@ -109,11 +109,14 @@ func (n *Node) nodeConnectionHandler(msg Message) Response {
 		}
 		return Response{}
 	case Snapshot:
-		replica, exists := n.replicas[msg.PartitionId]
+		r, exists := n.replicas[msg.PartitionId]
 		if !exists {
-			return Response{Error: fmt.Errorf("partition %d not found in node %d", msg.PartitionId, n.Id)}
+			n.replicasMapMutex.Lock()
+			r = replica.NewReplica(n.Id, msg.PartitionId, replica.Follower)
+			n.replicas[msg.PartitionId] = r
+			n.replicasMapMutex.Unlock()
 		}
-		replica.ReceiveSnapshot(&msg.Snapshot)
+		r.ReceiveSnapshot(&msg.Snapshot)
 		log.Printf("[nodeConnectionHandler] Received snapshot for partition %d", msg.PartitionId)
 		return Response{}
 	default:
