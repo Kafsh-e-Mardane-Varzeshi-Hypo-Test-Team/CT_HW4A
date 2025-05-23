@@ -79,6 +79,7 @@ func (n *Node) handleSendPartitionToNode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing address parameter"})
 		return
 	}
+	address = "http://" + address
 
 	if err := n.sendSnapshotToNode(partitionId, address); err != nil {
 		log.Printf("[node.handleSendPartitionToNode] %v", err)

@@ -71,7 +71,19 @@ func (c *Controller) handleHeartbeat(ctx *gin.Context) {
 }
 
 func (c *Controller) handleRegisterNode(ctx *gin.Context) {
+	nodeID, err := strconv.Atoi(ctx.PostForm("NodeID"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid node ID"})
+		return
+	}
 
+	err = c.RegisterNode(nodeID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register node"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Node is creating"})
 }
 
 func (c *Controller) handleRemoveNode(ctx *gin.Context) {

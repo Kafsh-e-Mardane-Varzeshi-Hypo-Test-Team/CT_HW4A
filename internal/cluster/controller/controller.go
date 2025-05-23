@@ -168,7 +168,7 @@ func (c *Controller) makeNodeReady(nodeID int) {
 func (c *Controller) replicate(partitionID, nodeID int) error {
 	if c.partitions[partitionID].Leader == -1 {
 		c.mu.Lock()
-		addr := fmt.Sprintf("http://%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
+		addr := fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
 		c.mu.Unlock()
 
 		resp, err := c.doNodeRequest("POST", addr)
@@ -190,7 +190,8 @@ func (c *Controller) replicate(partitionID, nodeID int) error {
 	}
 
 	c.mu.Lock()
-	addr := fmt.Sprintf("http://%s/add-replica/%d", c.nodes[c.partitions[partitionID].Leader].HttpAddress, nodeID)
+	addr := fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress[7:])
+	fmt.Println("helllo", addr)
 	c.mu.Unlock()
 
 	resp, err := c.doNodeRequest("POST", addr)
