@@ -20,9 +20,9 @@ func (n *Node) setupRoutes() {
 	n.ginEngine.POST("/send-partition/:partition-id/:address", n.handleSendPartitionToNode)
 
 	// loadbalancer routes
-	n.ginEngine.POST("/partition-id/:key/:value", n.handleSetRequest)
-	n.ginEngine.GET("/partition-id/:key", n.handleGetRequest)
-	n.ginEngine.DELETE("/partition-id/:key", n.handleDeleteRequest)
+	n.ginEngine.POST("/:partition-id/:key/:value", n.handleSetRequest)
+	n.ginEngine.GET("/:partition-id/:key", n.handleGetRequest)
+	n.ginEngine.DELETE("/:partition-id/:key", n.handleDeleteRequest)
 }
 
 func (n *Node) handleAddPartition(c *gin.Context) {
