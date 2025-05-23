@@ -57,7 +57,9 @@ func (n *Node) handleDeletePartition(c *gin.Context) {
 		return
 	}
 
-	delete(n.replicas, partitionId)
+	// Possibly done like this so that concurrent requests to the same partitionId are handled correctly
+	// TODO: Ask Parisa on this
+	n.replicas[partitionId] = nil
 	c.JSON(http.StatusOK, nil)
 }
 
