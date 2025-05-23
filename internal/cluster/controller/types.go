@@ -3,9 +3,12 @@ package controller
 type NodeStatus string
 
 const (
-	Up       NodeStatus = "Up"
-	Down     NodeStatus = "Down"
-	Creating NodeStatus = "Creating"
+	Creating    NodeStatus = "creating"
+	Configuring NodeStatus = "configuring"
+	Syncing     NodeStatus = "syncing"
+	Ready       NodeStatus = "ready"
+	Alive       NodeStatus = "alive"
+	Failed      NodeStatus = "failed"
 )
 
 type NodeMetadata struct {

@@ -1,15 +1,19 @@
 package main
 
 import (
+	"log"
+
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller/api"
-	"github.com/gin-gonic/gin"
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller/docker"
 )
 
 func main() {
-	controller := controller.NewController(1, 1)
-	controller.Start()
-
-	r := gin.Default()
-	r.POST("/node/register", api.RegisterNode)
+	dockerClient, err := docker.NewDockerClient()
+	if err != nil {
+		panic("Failed to create Docker client")
+	}
+	controller := controller.NewController(dockerClient, 3, 2, "temp", "helloworld:1")
+	if err := controller.Run(":8080"); err != nil {
+		log.Fatalf("Failed to start controller: %v", err)
+	}
 }
