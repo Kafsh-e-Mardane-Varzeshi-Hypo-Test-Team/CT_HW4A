@@ -30,7 +30,6 @@ type Response struct {
 	Value string
 }
 
-type Heartbeat struct{
-	NodeId    int
-	Timestamp int64
+type Heartbeat struct {
+	NodeId int
 }
