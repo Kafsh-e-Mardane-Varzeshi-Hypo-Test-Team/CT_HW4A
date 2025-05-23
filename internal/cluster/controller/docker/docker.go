@@ -44,7 +44,7 @@ func (d *DockerClient) CreateNodeContainer(imageName string, nodeID int, network
 		NetworkMode: container.NetworkMode(networkName),
 	}, nil, nil, nodeName)
 	if err != nil {
-		log.Printf("docker::CreateNodeContainer: Failed to create container %s\n", nodeName)
+		log.Printf("docker::CreateNodeContainer: Failed to create container %s: %v\n", nodeName, err)
 		return errors.New("failed to create node container")
 	}
 	log.Printf("docker::CreateNodeContainer: %s created successfully\n", nodeName)
