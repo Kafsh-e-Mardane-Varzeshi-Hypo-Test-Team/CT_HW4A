@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -14,14 +15,15 @@ import (
 )
 
 const (
-	CONTROLLER_ADDRESS = "8000"
-	HEARTBEAT_TIMER    = 2 * time.Second
+	HEARTBEAT_TIMER = 2 * time.Second
 )
 
 type Node struct {
-	Id        int
-	replicas  map[int]*replica.Replica // partitionId, replica of that partiotionId
-	ginEngine *gin.Engine
+	Id       int
+	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
+
+	ginEngine  *gin.Engine
+	httpClient *http.Client
 }
 
 func NewNode(id int) Node {
@@ -33,6 +35,14 @@ func NewNode(id int) Node {
 		Id:        id,
 		replicas:  make(map[int]*replica.Replica),
 		ginEngine: router,
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:       100,
+				IdleConnTimeout:    30 * time.Second,
+				DisableCompression: false,
+			},
+		},
 	}
 	// TODO: run node.start node in main.go file of container
 }
@@ -187,7 +197,7 @@ func (n *Node) broadcastToFollowers(replicaLog replica.ReplicaLog) {
 	}
 }
 
-func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
+func (n *Node) replicateToFollower(fn *controller.NodeMetadata, msg Message) {
 	maxRetries := 3
 	retryDelay := 100 * time.Millisecond
 	for i := 0; i < maxRetries; i++ {
@@ -236,33 +246,6 @@ func (n *Node) replicateToFollower(fn controller.NodeMetadata, msg Message) {
 	}
 
 	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", fn.Address, maxRetries)
-}
-
-// TODO: convert to http
-func (n *Node) getNodesContainingPartition(partitionId int) ([]controller.NodeMetadata, error) {
-	conn, err := net.Dial("tcp", ":"+CONTROLLER_ADDRESS)
-	if err != nil {
-		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to connect to controller at %s: %v", CONTROLLER_ADDRESS, err)
-	}
-	defer conn.Close()
-
-	encoder := gob.NewEncoder(conn)
-	decoder := gob.NewDecoder(conn)
-
-	if err := encoder.Encode("Get-Nodes-Containing-Partition"); err != nil {
-		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to encode request type: %v", err)
-	}
-
-	if err := encoder.Encode(partitionId); err != nil {
-		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to encode partition ID: %v", err)
-	}
-
-	var nodes []controller.NodeMetadata
-	if err := decoder.Decode(&nodes); err != nil {
-		return nil, fmt.Errorf("[node.getNodesContainingPartition] failed to decode response: %v", err)
-	}
-
-	return nodes, nil
 }
 
 func (n *Node) loadConfig() error {

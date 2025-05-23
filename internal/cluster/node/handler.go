@@ -1,10 +1,15 @@
 package node
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
 )
@@ -117,4 +122,38 @@ func (n *Node) handleDeleteRequest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, nil)
+}
+
+func (n *Node) getNodesContainingPartition(partitionId int) ([]*controller.NodeMetadata, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("controller/node-metadata/%d", partitionId)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		log.Printf("[node.getNodesContainingPartition] failed to connect to controller: %v", err)
+		return nil, err
+	}
+
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[node.getNodesContainingPartition] failed to do http request: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[node.getNodesContainingPartition] failed to do htpp request: %v", err)
+		return nil, fmt.Errorf("failed to fetch metadata: status %d", resp.StatusCode)
+	}
+
+	metadata := struct {
+		Partitions []*controller.NodeMetadata `json:"partitions"`
+	}{}
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		log.Printf("[node.getNodesContainingPartition] failed to decode response: %v", err)
+		return nil, err
+	}
+
+	return metadata.Partitions, nil
 }
