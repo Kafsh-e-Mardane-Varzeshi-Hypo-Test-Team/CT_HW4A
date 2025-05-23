@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
@@ -23,6 +22,7 @@ type Node struct {
 	Id       int
 	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
 
+	address    string
 	ginEngine  *gin.Engine
 	httpClient *http.Client
 }
@@ -35,6 +35,7 @@ func NewNode(id int) Node {
 	return Node{
 		Id:        id,
 		replicas:  make(map[int]*replica.Replica),
+		address:   fmt.Sprintf("node-%d", id),
 		ginEngine: router,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -54,17 +55,17 @@ func (n *Node) Start() error {
 		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
 	}
 	go n.startHeartbeat(HEARTBEAT_TIMER)
-	go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.nodeConnectionHandler) // TODO: read about this address
+	go n.tcpListener(n.nodeConnectionHandler)
 	return nil
 }
 
-func (n *Node) tcpListener(address string, handler func(Message) Response) {
-	ln, err := net.Listen("tcp", ":"+address)
+func (n *Node) tcpListener(handler func(Message) Response) {
+	ln, err := net.Listen("tcp", n.address)
 	if err != nil {
-		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", address, err)
+		log.Printf("[node.tcpListener] Node failed to listen on address %s: %v", n.address, err)
 		return
 	}
-	log.Printf("[node.tcpListener] Listening on address %s", address)
+	log.Printf("[node.tcpListener] Listening on address %s", n.address)
 
 	for {
 		conn, err := ln.Accept()
