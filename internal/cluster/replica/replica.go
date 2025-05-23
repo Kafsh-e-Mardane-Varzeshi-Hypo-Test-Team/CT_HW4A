@@ -57,7 +57,7 @@ func (r *Replica) Set(key, value string, timestamp int64) (ReplicaLog, error) {
 				requestTimestamp: ts,
 				newValue:         value,
 			}
-			log.Println(err.Error())
+			log.Println("[replica.Set]", err.Error())
 			return ReplicaLog{}, err
 		}
 	}
@@ -77,7 +77,7 @@ func (r *Replica) Set(key, value string, timestamp int64) (ReplicaLog, error) {
 		r.lsm.AddLogEntry(logEntry)
 	}
 
-	log.Println(r.modePrefix() + "SetKey: " + logEntry.String())
+	log.Println("[replica.Set]", r.modePrefix()+"SetKey:", logEntry.String())
 	return logEntry, nil
 }
 
@@ -88,7 +88,7 @@ func (r *Replica) Get(key string) (ReplicaLog, error) {
 	data, ok := r.data[key]
 	if !ok {
 		err := &KeyNotFoundError{key}
-		log.Println(err.Error())
+		log.Println("[replica.Get]", err.Error())
 		return ReplicaLog{}, err
 	}
 
@@ -100,7 +100,7 @@ func (r *Replica) Get(key string) (ReplicaLog, error) {
 		Key:         key,
 		Value:       data.Value,
 	}
-	log.Println(r.modePrefix() + "GetKey: " + logEntry.String())
+	log.Println("[replica.Get]", r.modePrefix()+"GetKey:", logEntry.String())
 	return logEntry, nil
 }
 
@@ -112,7 +112,7 @@ func (r *Replica) Delete(key string, timestamp int64) (ReplicaLog, error) {
 	data, ok := r.data[key]
 	if !ok {
 		err := &KeyNotFoundError{key}
-		log.Println(err.Error())
+		log.Println("[replica.Delete]", err.Error())
 		return ReplicaLog{}, err
 	}
 
@@ -130,7 +130,7 @@ func (r *Replica) Delete(key string, timestamp int64) (ReplicaLog, error) {
 				oldTimestamp:     data.Timestamp,
 				requestTimestamp: timestamp,
 			}
-			log.Println(err.Error())
+			log.Println("[replica.Delete]", err.Error())
 			return ReplicaLog{}, err
 		}
 	}
@@ -150,7 +150,7 @@ func (r *Replica) Delete(key string, timestamp int64) (ReplicaLog, error) {
 		r.lsm.AddLogEntry(logEntry)
 	}
 
-	log.Println(r.modePrefix() + "DeleteKey: " + logEntry.String())
+	log.Println("[replica.Delete]", r.modePrefix()+"DeleteKey:", logEntry.String())
 	return logEntry, nil
 }
 
@@ -206,7 +206,7 @@ func (r *Replica) ReceiveSnapshot(snapshot *Snapshot) {
 		}
 
 		// log number of data entries after applying snapshot
-		log.Printf("Node %d, partition %d applied snapshot resulting in %d data entries\n", r.NodeId, r.PartitionId, len(r.data))
+		log.Printf("[replica.ReceiveSnapshot] Node %d, partition %d applied snapshot resulting in %d data entries\n", r.NodeId, r.PartitionId, len(r.data))
 
 		r.lsm.mem = NewMemTable()
 	}
@@ -231,7 +231,7 @@ func (r *Replica) GetSnapshot() *Snapshot {
 		snapshot.Tables[i] = *table
 	}
 
-	log.Println("Snapshot created with " + strconv.FormatInt(int64(len(snapshot.Tables)), 10) + " tables")
+	log.Println("[replica.ReceiveSnapshot]", "Snapshot created with", strconv.FormatInt(int64(len(snapshot.Tables)), 10), "tables")
 
 	return snapshot
 }
@@ -267,15 +267,15 @@ func (r *Replica) applyLogEntry(logEntry ReplicaLog) {
 			}
 			r.data[logEntry.Key] = data
 		} else {
-			log.Println("Key " + logEntry.Key + " already exists with a newer timestamp, ignoring snapshot entry")
+			log.Println("[replica.applyLogEntry]", "Key", logEntry.Key, "already exists with a newer timestamp, ignoring snapshot entry")
 		}
 	} else if logEntry.Action == ReplicaActionDelete {
 		if _, exists := r.data[logEntry.Key]; exists {
 			delete(r.data, logEntry.Key)
 		} else {
-			log.Println("Key " + logEntry.Key + " not found for deletion in snapshot")
+			log.Println("[replica.applyLogEntry]", "Key", logEntry.Key, "not found for deletion in snapshot")
 		}
 	} else {
-		log.Println("Unknown action in snapshot entry: " + logEntry.String())
+		log.Println("[replica.applyLogEntry]", "Unknown action in snapshot entry:", logEntry.String())
 	}
 }
