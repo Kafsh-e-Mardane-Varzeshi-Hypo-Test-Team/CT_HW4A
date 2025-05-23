@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +35,7 @@ func (lb *LoadBalancer) handleGet(c *gin.Context) {
 	var responseBody []byte
 
 	for i := 0; i < lb.maxRetries; i++ {
-		resp, err = lb.doNodeRequest(http.MethodGet, nodeAddr, key, "")
+		resp, err = lb.doNodeRequest(http.MethodGet, nodeAddr, strconv.Itoa(partitionID), key, "")
 		if err == nil {
 			defer resp.Body.Close()
 			responseBody, err = io.ReadAll(resp.Body)
@@ -75,7 +75,7 @@ func (lb *LoadBalancer) handleSet(c *gin.Context) {
 	var responseBody []byte
 
 	for i := 0; i < lb.maxRetries; i++ {
-		resp, err = lb.doNodeRequest(c.Request.Method, leaderAddr, key, value)
+		resp, err = lb.doNodeRequest(c.Request.Method, leaderAddr, strconv.Itoa(partitionID), key, value)
 		if err == nil {
 			defer resp.Body.Close()
 			responseBody, err = io.ReadAll(resp.Body)
@@ -112,7 +112,7 @@ func (lb *LoadBalancer) handleDelete(c *gin.Context) {
 	var responseBody []byte
 
 	for i := 0; i < lb.maxRetries; i++ {
-		resp, err = lb.doNodeRequest(http.MethodDelete, leaderAddr, key, "")
+		resp, err = lb.doNodeRequest(http.MethodDelete, leaderAddr, strconv.Itoa(partitionID), key, "")
 		if err == nil {
 			defer resp.Body.Close()
 			responseBody, err = io.ReadAll(resp.Body)
@@ -136,20 +136,14 @@ func (lb *LoadBalancer) handleDelete(c *gin.Context) {
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
 }
 
-func (lb *LoadBalancer) doNodeRequest(method, nodeAddr, key, value string) (*http.Response, error) {
+func (lb *LoadBalancer) doNodeRequest(method, nodeAddr, partitionID, key, value string) (*http.Response, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), lb.requestTimeout)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/%s", nodeAddr, key)
+	url := fmt.Sprintf("%s/%s/%s/%s", nodeAddr, partitionID, key, value)
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
-	}
-
-	if value != "" {
-		req.Body = io.NopCloser(strings.NewReader(value))
-		req.ContentLength = int64(len(value))
-		req.Header.Set("Content-Type", "application/json")
 	}
 
 	return lb.httpClient.Do(req)
