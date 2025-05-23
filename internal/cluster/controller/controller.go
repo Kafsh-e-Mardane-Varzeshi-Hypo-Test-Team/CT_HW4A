@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand/v2"
 	"net/http"
@@ -126,7 +128,13 @@ func (c *Controller) makeNodeReady(nodeID int) {
 	}
 
 	for _, partition := range partitionsToAssign {
-		c.replicate(partition, nodeID)
+		for i := 0; i < 3; i++ {
+			err := c.replicate(partition, nodeID)
+			if err == nil {
+				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d: %v\n", partition, nodeID, err)
+				break
+			}
+		}
 	}
 
 	// c.waitForNodeReady()
@@ -137,12 +145,23 @@ func (c *Controller) makeNodeReady(nodeID int) {
 	log.Printf("controller::makeNodeReady: Node %d is now ready\n", nodeID)
 }
 
-func (c *Controller) replicate(partitionID, nodeID int) {
+func (c *Controller) replicate(partitionID, nodeID int) error {
 	c.mu.Lock()
 	if c.partitions[partitionID].Leader == -1 {
 		c.partitions[partitionID].Leader = nodeID
 		c.mu.Unlock()
-		return
+
+		addr := fmt.Sprintf("node-%d:8080/add-partition/%d", nodeID, partitionID)
+		resp, err := c.doNodeRequest("POST", addr)
+		defer resp.Body.Close()
+		if err != nil {
+			log.Printf("controller::replicate: Failed to add partition %d to node %d: %v\n", partitionID, nodeID, err)
+			return errors.New("failed to add partition")
+		}
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("controller::replicate: Failed to add partition %d to node %d: %s. partition already exists.\n", partitionID, nodeID, resp.Status)
+		}
+		return nil
 	}
 	c.mu.Unlock()
 
@@ -151,4 +170,17 @@ func (c *Controller) replicate(partitionID, nodeID int) {
 	// add nodeID to partition
 
 	log.Printf("controller::replicate: Partition %d replicated to node %d\n", partitionID, nodeID)
+	return nil
+}
+
+func (c *Controller) doNodeRequest(method, addr string) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, method, addr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.httpClient.Do(req)
 }
