@@ -12,13 +12,18 @@ import (
 )
 
 func (lb *LoadBalancer) setupRoutes() {
-	lb.ginEngine.GET("/:key", lb.handleGet)
-	lb.ginEngine.POST("/", lb.handleSet)
-	lb.ginEngine.DELETE("/:key", lb.handleDelete)
+	lb.ginEngine.GET("/ping", lb.handleHealthCheck)
+	lb.ginEngine.GET("/client/:key", lb.handleGet)
+	lb.ginEngine.POST("/client/:key/:value", lb.handleSet)
+	lb.ginEngine.DELETE("/client/:key", lb.handleDelete)
 }
 
 func (lb *LoadBalancer) Run(addr string) error {
 	return lb.ginEngine.Run(addr)
+}
+
+func (lb *LoadBalancer) handleHealthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (lb *LoadBalancer) handleGet(c *gin.Context) {
