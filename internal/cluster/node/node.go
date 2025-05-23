@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	REQUEST_TIMEOUT = 2 * time.Second
 	HEARTBEAT_TIMER = 2 * time.Second
 )
 
@@ -53,9 +54,7 @@ func (n *Node) Start() error {
 		return fmt.Errorf("[node.Start] can not load config due to: %v", err)
 	}
 	go n.startHeartbeat(HEARTBEAT_TIMER)
-
 	go n.tcpListener("follower-requests-to-leader"+strconv.Itoa(n.Id), n.nodeConnectionHandler) // TODO: read about this address
-	// TODO: other tcp listeners
 	return nil
 }
 
@@ -158,8 +157,6 @@ func (n *Node) delete(partitionId int, timestamp int64, key string, replicaType 
 	if r.Mode != replicaType {
 		return fmt.Errorf("[node.delete] node id: %v contains no %v replica for partition %v", n.Id, replicaType, partitionId)
 	}
-
-	// TODO(me): append to WAL
 
 	replicaLog, err := r.Delete(key, timestamp)
 	if err != nil {

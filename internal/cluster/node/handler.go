@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
@@ -126,7 +125,7 @@ func (n *Node) handleDeleteRequest(c *gin.Context) {
 }
 
 func (n *Node) getNodesContainingPartition(partitionId int) ([]*controller.NodeMetadata, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), REQUEST_TIMEOUT)
 	defer cancel()
 
 	url := fmt.Sprintf("controller/node-metadata/%d", partitionId)
