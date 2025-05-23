@@ -26,8 +26,10 @@ A distributed in-memory key-value store written in Go. The system follows a sing
 * **Client**: Interfaces with the system to send key-value operations and manage nodes/partitions.
 
 ## Running with Docker
-
-> Docker setup in progress. Example command will be provided here once available.
+Run in project's root:
+```
+docker compose up --build
+```
 
 ## Contributors
 
