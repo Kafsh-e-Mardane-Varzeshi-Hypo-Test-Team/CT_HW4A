@@ -1,5 +1,7 @@
 package controller
 
+import "time"
+
 type NodeStatus string
 
 const (
@@ -12,9 +14,10 @@ const (
 )
 
 type NodeMetadata struct {
-	ID      int        `json:"id"`
-	Address string     `json:"address"`
-	Status  NodeStatus `json:"status"`
+	ID       int        `json:"id"`
+	Address  string     `json:"address"`
+	Status   NodeStatus `json:"status"`
+	lastSeen time.Time
 }
 
 type PartitionMetadata struct {

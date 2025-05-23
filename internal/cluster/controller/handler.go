@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -11,6 +12,8 @@ import (
 func (c *Controller) setupRoutes() {
 	c.ginEngine.GET("/metadata", c.handleGetMetadata)
 	c.ginEngine.GET("/node-metadata/:partitionID", c.handleGetNodeMetadata)
+
+	c.ginEngine.POST("/node-heartbeat", c.handleHeartbeat)
 
 	c.ginEngine.POST("/nodes", c.handleRegisterNode)
 }
@@ -52,6 +55,18 @@ func (c *Controller) handleGetNodeMetadata(ctx *gin.Context) {
 	c.mu.Unlock()
 
 	ctx.JSON(http.StatusOK, metadata)
+}
+
+func (c *Controller) handleHeartbeat(ctx *gin.Context) {
+	nodeID, err := strconv.Atoi(ctx.PostForm("NodeID"))
+	if err != nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.nodes[nodeID].lastSeen = time.Now()
+	c.mu.Unlock()
+	ctx.Status(http.StatusOK)
 }
 
 func (c *Controller) handleRegisterNode(ctx *gin.Context) {
