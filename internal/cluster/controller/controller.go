@@ -114,7 +114,6 @@ func (c *Controller) makeNodeReady(nodeID int) {
 	for _, partition := range c.partitions {
 		if len(partition.Replicas) < c.replicationFactor {
 			partitionsToAssign = append(partitionsToAssign, partition.PartitionID)
-			c.partitions[partition.PartitionID].Replicas = append(c.partitions[partition.PartitionID].Replicas, nodeID)
 		}
 	}
 	c.mu.Unlock()
@@ -147,7 +146,7 @@ func (c *Controller) replicate(partitionID, nodeID int) {
 
 	// TODO: request to partition leader node to replicate in the new node
 	// retry mechanism
-	// remove nodeID from partition if replication fails
+	// add nodeID to partition
 
 	log.Printf("controller::replicate: Partition %d replicated to node %d\n", partitionID, nodeID)
 }

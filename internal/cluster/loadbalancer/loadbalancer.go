@@ -121,7 +121,9 @@ func (lb *LoadBalancer) refreshMetadata() error {
 		return fmt.Errorf("failed to fetch metadata: status %d", resp.StatusCode)
 	}
 
-	var metadata PartitionMetadataList
+	metadata := struct {
+		Partitions []*controller.PartitionMetadata `json:"partitions"`
+	}{}
 	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
 		return err
 	}
@@ -130,7 +132,7 @@ func (lb *LoadBalancer) refreshMetadata() error {
 	defer lb.metadataLock.Unlock()
 
 	lb.metadataExpiry = time.Now().Add(lb.refreshInterval)
-	lb.partitionCache = metadata.partitions
+	lb.partitionCache = metadata.Partitions
 
 	return nil
 }

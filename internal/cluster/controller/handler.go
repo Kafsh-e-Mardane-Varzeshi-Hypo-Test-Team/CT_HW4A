@@ -2,6 +2,7 @@ package controller
 
 import (
 	"log"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,7 +21,15 @@ func (c *Controller) Run(addr string) error {
 }
 
 func (c *Controller) handleGetMetadata(ctx *gin.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
+	metadata := struct {
+		Partitions []*PartitionMetadata `json:"partitions"`
+	}{}
+	metadata.Partitions = c.partitions
+
+	ctx.JSON(http.StatusOK, metadata)
 }
 
 func (c *Controller) handleRegisterNode(ctx *gin.Context) {
