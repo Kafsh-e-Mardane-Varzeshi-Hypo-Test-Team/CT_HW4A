@@ -276,12 +276,12 @@ func (n *Node) sendSnapshotToNode(partitionId int, address string) error {
 	n.replicasMapMutex.RLock()
 	replica, exists := n.replicas[partitionId]
 	if !exists {
-		return fmt.Errorf("partition %d not found", partitionId)
+		return fmt.Errorf("[node.sendSnapshotToNode] partition %d not found", partitionId)
 	}
 
 	snapshot := replica.GetSnapshot()
 	if snapshot == nil {
-		return fmt.Errorf("failed to get snapshot for partition %d", partitionId)
+		return fmt.Errorf("[node.sendSnapshotToNode] failed to get snapshot for partition %d", partitionId)
 	}
 	n.replicasMapMutex.RUnlock()
 
