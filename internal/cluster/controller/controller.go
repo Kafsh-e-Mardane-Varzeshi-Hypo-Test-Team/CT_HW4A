@@ -99,8 +99,10 @@ func (c *Controller) RegisterNode(nodeID int) error {
 
 	c.mu.Lock()
 	node := c.nodes[nodeID]
-	node.TcpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, tcpPort)
+	node.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
+	log.Printf("controller::RegisterNode: Node %d created with TCP address %s\n", nodeID, node.TcpAddress)
 	node.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
+	log.Printf("controller::RegisterNode: Node %d created with HTTP address %s\n", nodeID, node.HttpAddress)
 	node.Status = Syncing
 	c.mu.Unlock()
 
@@ -149,7 +151,7 @@ func (c *Controller) makeNodeReady(nodeID int) {
 			}
 			if i == 2 {
 				log.Printf("controller::makeNodeReady: Failed to replicate partition %d to node %d: %v\n", partition, nodeID, err)
-				c.dockerClient.RemoveNodeContainer(nodeID)
+				// c.dockerClient.RemoveNodeContainer(nodeID)
 				return
 			}
 			log.Printf("controller::makeNodeReady: Retrying to replicate partition %d to node %d: %v\n", partition, nodeID, err)
@@ -190,7 +192,7 @@ func (c *Controller) replicate(partitionID, nodeID int) error {
 	}
 
 	c.mu.Lock()
-	addr := fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress[7:])
+	addr := fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress)
 	fmt.Println("helllo", addr)
 	c.mu.Unlock()
 

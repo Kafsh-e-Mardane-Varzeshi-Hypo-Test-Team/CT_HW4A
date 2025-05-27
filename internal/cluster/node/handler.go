@@ -79,7 +79,7 @@ func (n *Node) handleSendPartitionToNode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing address parameter"})
 		return
 	}
-	address = "http://" + address
+	log.Printf("[node.handleSendPartitionToNode] sending partition %d to address %s", partitionId, address)
 
 	if err := n.sendSnapshotToNode(partitionId, address); err != nil {
 		log.Printf("[node.handleSendPartitionToNode] %v", err)
@@ -153,7 +153,7 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), REQUEST_TIMEOUT)
 	defer cancel()
 
-	url := fmt.Sprintf("controller/node-metadata/%d", partitionId)
+	url := fmt.Sprintf("http://controller:8080/node-metadata/%d", partitionId)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		log.Printf("[node.getNodesContainingPartition] failed to connect to controller: %v", err)
@@ -193,7 +193,7 @@ func (n *Node) sendHeartbeat() error {
 		return fmt.Errorf("[node.sendHeartbeat] failed to marshal heartbeat: %v", err)
 	}
 
-	resp, err := http.Post("controller/node-heartbeat", "application/json", bytes.NewBuffer(body))
+	resp, err := http.Post("http://controller:8080/node-heartbeat", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("[node.sendHeartbeat] failed to send heartbeat: %v", err)
 	}

@@ -51,11 +51,11 @@ func NewNode(id int) *Node {
 }
 
 func (n *Node) Start() {
-	n.setupRoutes()
-	n.ginEngine.Run(HTTP_ADDRESS)
-
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 	go n.tcpListener(n.nodeConnectionHandler)
+
+	n.setupRoutes()
+	n.ginEngine.Run(HTTP_ADDRESS)
 }
 
 func (n *Node) tcpListener(handler func(Message) Response) {
