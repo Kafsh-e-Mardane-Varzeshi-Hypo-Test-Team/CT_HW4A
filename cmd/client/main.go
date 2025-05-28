@@ -18,7 +18,7 @@ func main() {
 			if baseURL == "" {
 				baseURL = os.Getenv("CLIENT_BASE_URL")
 				if baseURL == "" {
-					baseURL = "http://controller:9001"
+					baseURL = "http://loadbalancer:9001"
 				}
 			}
 		},
