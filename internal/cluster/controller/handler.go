@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -51,7 +52,9 @@ func (c *Controller) handleGetNodeMetadata(ctx *gin.Context) {
 	c.mu.Lock()
 	metadata.Addresses = make([]string, len(c.partitions[partitionID].Replicas))
 	for i, replica := range c.partitions[partitionID].Replicas {
-		metadata.Addresses[i] = c.nodes[replica].TcpAddress
+		if c.nodes[replica].Status == Alive {
+			metadata.Addresses[i] = c.nodes[replica].TcpAddress
+		}
 	}
 	c.mu.Unlock()
 
@@ -65,6 +68,10 @@ func (c *Controller) handleHeartbeat(ctx *gin.Context) {
 	}
 
 	c.mu.Lock()
+	if c.nodes[nodeID].Status == Dead {
+		log.Printf("controller::handleHeartbeat: Node %d revived\n", nodeID)
+		// TODO go c.reviveNode(nodeID)
+	}
 	c.nodes[nodeID].lastSeen = time.Now()
 	c.mu.Unlock()
 	ctx.Status(http.StatusOK)

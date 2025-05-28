@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -137,34 +136,28 @@ func (c *Controller) makeNodeReady(nodeID int) {
 	}
 	c.mu.Unlock()
 
-	if len(partitionsToAssign) == 0 {
-		partitionID := rand.IntN(c.partitionCount)
-		partitionsToAssign = append(partitionsToAssign, partitionID)
-	}
-
-	for _, partition := range partitionsToAssign {
-		for i := 0; i < 3; i++ {
-			err := c.replicate(partition, nodeID)
-			if err == nil {
-				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d: %v\n", partition, nodeID, err)
-				break
-			}
-			if i == 2 {
-				log.Printf("controller::makeNodeReady: Failed to replicate partition %d to node %d: %v\n", partition, nodeID, err)
-				// c.dockerClient.RemoveNodeContainer(nodeID)
-				return
-			}
-			log.Printf("controller::makeNodeReady: Retrying to replicate partition %d to node %d: %v\n", partition, nodeID, err)
-			time.Sleep(1 * time.Second)
-		}
-	}
-
-	// c.waitForNodeReady()
+	c.replicatePartitions(partitionsToAssign, nodeID)
 
 	c.mu.Lock()
 	c.nodes[nodeID].Status = Alive
 	c.mu.Unlock()
 	log.Printf("controller::makeNodeReady: Node %d is now ready\n", nodeID)
+}
+
+func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
+	for _, partition := range partitionsToAssign {
+		for i := 0; i < 3; i++ {
+			err := c.replicate(partition, nodeID)
+			if err == nil {
+				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d\n", partition, nodeID)
+				break
+			}
+			if i == 2 {
+				log.Printf("controller::makeNodeReady: Failed to replicate partition %d to node %d: %v\n", partition, nodeID, err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}
 }
 
 func (c *Controller) replicate(partitionID, nodeID int) error {
@@ -193,7 +186,6 @@ func (c *Controller) replicate(partitionID, nodeID int) error {
 
 	c.mu.Lock()
 	addr := fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress)
-	fmt.Println("helllo", addr)
 	c.mu.Unlock()
 
 	resp, err := c.doNodeRequest("POST", addr)
@@ -232,11 +224,15 @@ func (c *Controller) monitorHeartbeat() {
 		for _, node := range c.nodes {
 			if time.Since(node.lastSeen) > 10*time.Second {
 				log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
-				node.Status = Failed
+				node.Status = Dead
 			}
 		}
 		c.mu.Unlock()
 
 		time.Sleep(5 * time.Second)
 	}
+}
+
+func (c *Controller) reviveNode(nodeID int) {
+	// TODO
 }

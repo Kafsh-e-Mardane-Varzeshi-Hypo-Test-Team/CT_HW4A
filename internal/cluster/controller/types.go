@@ -5,12 +5,10 @@ import "time"
 type NodeStatus string
 
 const (
-	Creating    NodeStatus = "creating"
-	Configuring NodeStatus = "configuring"
-	Syncing     NodeStatus = "syncing"
-	Ready       NodeStatus = "ready"
-	Alive       NodeStatus = "alive"
-	Failed      NodeStatus = "failed"
+	Creating NodeStatus = "creating"
+	Syncing  NodeStatus = "syncing"
+	Alive    NodeStatus = "alive"
+	Dead     NodeStatus = "dead"
 )
 
 type NodeMetadata struct {
