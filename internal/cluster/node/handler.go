@@ -1,12 +1,12 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
@@ -184,16 +184,9 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 }
 
 func (n *Node) sendHeartbeat() error {
-	hb := Heartbeat{
-		NodeId: n.Id,
-	}
+	data := url.Values{"NodeID": {strconv.Itoa(n.Id)}}
 
-	body, err := json.Marshal(hb)
-	if err != nil {
-		return fmt.Errorf("[node.sendHeartbeat] failed to marshal heartbeat: %v", err)
-	}
-
-	resp, err := http.Post("http://controller:8080/node-heartbeat", "application/json", bytes.NewBuffer(body))
+	resp, err := http.PostForm("http://controller:8080/node-heartbeat", data)
 	if err != nil {
 		return fmt.Errorf("[node.sendHeartbeat] failed to send heartbeat: %v", err)
 	}

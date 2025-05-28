@@ -116,13 +116,13 @@ func (c *Controller) Start(addr string) error {
 		log.Fatalf("Failed to create initial node: %v", err)
 	}
 
+	go c.monitorHeartbeat()
+
 	err := c.Run(addr)
 	if err != nil {
 		log.Printf("controller::Start: Failed to run http server")
 		return err
 	}
-
-	go c.monitorHeartbeat()
 
 	return nil
 }

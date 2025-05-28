@@ -33,7 +33,3 @@ type Response struct {
 	Error error
 	Value string
 }
-
-type Heartbeat struct {
-	NodeId int
-}
