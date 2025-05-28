@@ -28,6 +28,22 @@ services:
       controller:
         condition: service_started
 
+  node:
+    image: ct_hw3-node:latest
+    build:
+      context: .
+      dockerfile: ./cmd/node/Dockerfile
+    profiles:
+      - build_only
+  
+  client:
+    image: ct_hw3-client:latest
+    build:
+      context: .
+      dockerfile: ./cmd/client/Dockerfile
+    profiles:
+      - build_only
+
 networks:
   temp:
     driver: bridge
