@@ -28,7 +28,8 @@ A distributed in-memory key-value store written in Go. The system follows a sing
 ## Running with Docker
 Run in project's root:
 ```
-docker compose up --build
+docker compose --profile "*" build
+docker compose up
 ```
 
 ## Contributors
