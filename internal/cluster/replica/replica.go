@@ -200,7 +200,7 @@ func (r *Replica) ReceiveSnapshot(snapshot *Snapshot) {
 		// apply data from snapshot
 		r.data = make(map[string]ReplicaData)
 		for _, table := range snapshot.Tables {
-			for _, logEntry := range table.data {
+			for _, logEntry := range table.Data {
 				r.applyLogEntry(logEntry)
 			}
 		}
@@ -216,7 +216,7 @@ func (r *Replica) GetSnapshot() *Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if len(r.lsm.mem.data) > 0 {
+	if len(r.lsm.mem.Data) > 0 {
 		r.lsm.flush()
 	}
 

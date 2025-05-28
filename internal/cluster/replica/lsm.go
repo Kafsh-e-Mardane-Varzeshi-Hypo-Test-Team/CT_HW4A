@@ -8,7 +8,7 @@ import (
 const maxLen int = 1e4
 
 type MemTable struct {
-	data []ReplicaLog
+	Data []ReplicaLog
 }
 
 type Snapshot struct {
@@ -24,7 +24,7 @@ type LSM struct {
 
 func NewMemTable() *MemTable {
 	return &MemTable{
-		data: []ReplicaLog{},
+		Data: []ReplicaLog{},
 	}
 }
 
@@ -39,11 +39,11 @@ func NewLSM() *LSM {
 
 func (l *LSM) AddLogEntry(logEntry ReplicaLog) {
 	l.mu.Lock()
-	l.mem.data = append(l.mem.data, logEntry)
+	l.mem.Data = append(l.mem.Data, logEntry)
 	l.wal = append(l.wal, logEntry)
 	l.mu.Unlock()
 
-	if len(l.mem.data) >= maxLen {
+	if len(l.mem.Data) >= maxLen {
 		l.flush()
 	}
 }
@@ -52,7 +52,7 @@ func (l *LSM) flush() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if len(l.mem.data) == 0 {
+	if len(l.mem.Data) == 0 {
 		return
 	}
 
@@ -72,41 +72,41 @@ func (l *LSM) WALAfter(ts int64) []ReplicaLog {
 
 // sortMemTableByKey sorts the entries of a MemTable by key (Data field in this example).
 func sortMemTableByKey(mt *MemTable) {
-	sort.Slice(mt.data, func(i, j int) bool {
-		return mt.data[i].Key < mt.data[j].Key
+	sort.Slice(mt.Data, func(i, j int) bool {
+		return mt.Data[i].Key < mt.Data[j].Key
 	})
 }
 
 // mergeOldest merges two sorted MemTables, keeping only the oldest ReplicaLog for each key.
 func mergeOldest(a, b *MemTable) *MemTable {
-	result := &MemTable{data: make([]ReplicaLog, 0, len(a.data)+len(b.data))}
+	result := &MemTable{Data: make([]ReplicaLog, 0, len(a.Data)+len(b.Data))}
 	i, j := 0, 0
 
-	for i < len(a.data) && j < len(b.data) {
-		if a.data[i].Key < b.data[j].Key {
-			result.data = append(result.data, a.data[i])
+	for i < len(a.Data) && j < len(b.Data) {
+		if a.Data[i].Key < b.Data[j].Key {
+			result.Data = append(result.Data, a.Data[i])
 			i++
-		} else if a.data[i].Key > b.data[j].Key {
-			result.data = append(result.data, b.data[j])
+		} else if a.Data[i].Key > b.Data[j].Key {
+			result.Data = append(result.Data, b.Data[j])
 			j++
 		} else {
 			// Same key, pick the older one
-			if a.data[i].Timestamp < (b.data[j].Timestamp) {
-				result.data = append(result.data, a.data[i])
+			if a.Data[i].Timestamp < (b.Data[j].Timestamp) {
+				result.Data = append(result.Data, a.Data[i])
 			} else {
-				result.data = append(result.data, b.data[j])
+				result.Data = append(result.Data, b.Data[j])
 			}
 			i++
 			j++
 		}
 	}
 
-	for i < len(a.data) {
-		result.data = append(result.data, a.data[i])
+	for i < len(a.Data) {
+		result.Data = append(result.Data, a.Data[i])
 		i++
 	}
-	for j < len(b.data) {
-		result.data = append(result.data, b.data[j])
+	for j < len(b.Data) {
+		result.Data = append(result.Data, b.Data[j])
 		j++
 	}
 

@@ -225,13 +225,6 @@ func (n *Node) replicateToFollower(address string, msg Message) error {
 		encoder := gob.NewEncoder(conn)
 		decoder := gob.NewDecoder(conn)
 
-		if err := encoder.Encode("Request-From-Node-Of-Leader-Partition"); err != nil {
-			log.Printf("[node.replicateToFollower] failed to send request type: %v", err)
-			conn.Close()
-			time.Sleep(retryDelay)
-			continue
-		}
-
 		if err := encoder.Encode(msg); err != nil {
 			log.Printf("[node.replicateToFollower] failed to send message: %v", err)
 			conn.Close()
