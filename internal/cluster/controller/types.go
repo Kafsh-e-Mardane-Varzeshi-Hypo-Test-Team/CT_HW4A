@@ -17,6 +17,7 @@ type NodeMetadata struct {
 	TcpAddress  string     `json:"tcp"`
 	Status      NodeStatus `json:"status"`
 	lastSeen    time.Time
+	partitions  []int
 }
 
 type PartitionMetadata struct {

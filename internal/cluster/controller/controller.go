@@ -154,6 +154,7 @@ func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 				} else {
 					partition.Replicas = append(partition.Replicas, nodeID)
 				}
+				c.nodes[nodeID].partitions = append(c.nodes[nodeID].partitions, partitionID)
 				c.mu.Unlock()
 				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d\n", partitionID, nodeID)
 				break
@@ -208,7 +209,7 @@ func (c *Controller) monitorHeartbeat() {
 					log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
 					node.Status = Dead
 
-					// go c.handleFailover(node.ID)
+					go c.handleFailover(node.ID)
 				}
 			}
 		}
@@ -218,6 +219,75 @@ func (c *Controller) monitorHeartbeat() {
 	}
 }
 
+func (c *Controller) handleFailover(nodeID int) {
+	log.Printf("controller::handleFailover: Handling failover for node %d\n", nodeID)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	node, exists := c.nodes[nodeID]
+	if !exists || node.Status != Dead {
+		c.mu.Unlock()
+		return
+	}
+
+	for _, partitionID := range node.partitions {
+		if c.partitions[partitionID].Leader == nodeID {
+			// set another node as leader
+			if len(c.partitions[partitionID].Replicas) > 0 {
+				newLeader := c.partitions[partitionID].Replicas[0]
+				c.partitions[partitionID].Leader = newLeader
+				log.Printf("controller::handleFailover: Node %d is now the leader for partition %d\n", newLeader, partitionID)
+				// notify the new leader to take over
+				addr := fmt.Sprintf("%s/set-leader/%d", c.nodes[newLeader].HttpAddress, partitionID)
+				resp, err := c.doNodeRequest("POST", addr)
+				if err != nil {
+					log.Printf("controller::handleFailover: Failed to notify new leader for partition %d: %v\n", partitionID, err)
+					continue
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					log.Printf("controller::handleFailover: Failed to set new leader for partition %d: %s\n", partitionID, resp.Status)
+				} else {
+					log.Printf("controller::handleFailover: New leader for partition %d is node %d\n", partitionID, newLeader)
+					// remove replica[0]
+					c.partitions[partitionID].Replicas = c.partitions[partitionID].Replicas[1:]
+				}
+			}
+		} else {
+			// remove this node from replicas
+			for i, replica := range c.partitions[partitionID].Replicas {
+				if replica == nodeID {
+					c.partitions[partitionID].Replicas = append(c.partitions[partitionID].Replicas[:i], c.partitions[partitionID].Replicas[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+}
+
 func (c *Controller) reviveNode(nodeID int) {
-	// TODO
+	c.mu.Lock()
+	node, exists := c.nodes[nodeID]
+	if !exists || node.Status != Dead {
+		c.mu.Unlock()
+		return
+	}
+	node.Status = Syncing
+	c.mu.Unlock()
+
+	log.Printf("controller::reviveNode: Reviving node %d\n", nodeID)
+
+	partitionsToReplicate := make([]int, 0)
+	c.mu.Lock()
+	for _, partition := range node.partitions {
+		partitionsToReplicate = append(partitionsToReplicate, partition)
+	}
+	node.partitions = make([]int, 0)
+	c.mu.Unlock()
+	c.replicatePartitions(partitionsToReplicate, nodeID)
+
+	c.mu.Lock()
+	c.nodes[nodeID].Status = Alive
+	c.mu.Unlock()
+	log.Printf("controller::reviveNode: Node %d revived successfully\n", nodeID)
 }

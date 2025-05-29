@@ -72,7 +72,7 @@ func (c *Controller) handleHeartbeat(ctx *gin.Context) {
 	c.mu.Lock()
 	if c.nodes[nodeID].Status == Dead {
 		log.Printf("controller::handleHeartbeat: Node %d revived\n", nodeID)
-		// TODO go c.reviveNode(nodeID)
+		go c.reviveNode(nodeID)
 	}
 	c.nodes[nodeID].lastSeen = time.Now()
 	c.mu.Unlock()
