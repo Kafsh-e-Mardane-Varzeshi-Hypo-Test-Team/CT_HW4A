@@ -161,8 +161,7 @@ func (r *Replica) ConvertToLeader() {
 	if r.Mode != Leader {
 		r.Mode = Leader
 		r.timestamp = 0
-		r.lsm.mu.Lock()
-		defer r.lsm.mu.Unlock()
+
 		r.lsm = NewLSM()
 		r.copyDataToLSM()
 		r.lsm.flush()
@@ -237,13 +236,6 @@ func (r *Replica) GetSnapshot() *Snapshot {
 }
 
 func (r *Replica) copyDataToLSM() {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	// Lock is held in AddLogEntry
-	// r.lsm.mu.Lock()
-	// defer r.lsm.mu.Unlock()
-
 	for key, data := range r.data {
 		logEntry := ReplicaLog{
 			PartitionId: r.PartitionId,
