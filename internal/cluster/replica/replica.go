@@ -164,6 +164,8 @@ func (r *Replica) ConvertToLeader() {
 		r.lsm.mu.Lock()
 		defer r.lsm.mu.Unlock()
 		r.lsm = NewLSM()
+		r.copyDataToLSM()
+		r.lsm.flush()
 	}
 }
 
@@ -176,8 +178,6 @@ func (r *Replica) ConvertToFollower() {
 	r.lsm.mu.Lock()
 	defer r.lsm.mu.Unlock()
 	r.lsm = NewLSM() // reset LSM, lock is held for previous LSM
-	r.copyDataToLSM()
-	r.lsm.flush()
 }
 
 func (r *Replica) modePrefix() string {
