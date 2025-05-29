@@ -30,9 +30,11 @@ func (c *Controller) handleGetMetadata(ctx *gin.Context) {
 		NodeAddresses map[int]string       `json:"nodes"`
 		Partitions    []*PartitionMetadata `json:"partitions"`
 	}{}
-	metadata.NodeAddresses = make(map[int]string, len(c.nodes))
+	metadata.NodeAddresses = make(map[int]string)
 	for id, node := range c.nodes {
-		metadata.NodeAddresses[id] = node.HttpAddress
+		if node.Status == Alive {
+			metadata.NodeAddresses[id] = node.HttpAddress
+		}
 	}
 	metadata.Partitions = c.partitions
 

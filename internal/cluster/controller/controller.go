@@ -99,9 +99,7 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	c.mu.Lock()
 	node := c.nodes[nodeID]
 	node.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
-	log.Printf("controller::RegisterNode: Node %d created with TCP address %s\n", nodeID, node.TcpAddress)
 	node.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
-	log.Printf("controller::RegisterNode: Node %d created with HTTP address %s\n", nodeID, node.HttpAddress)
 	node.Status = Syncing
 	c.mu.Unlock()
 
@@ -145,15 +143,22 @@ func (c *Controller) makeNodeReady(nodeID int) {
 }
 
 func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
-	for _, partition := range partitionsToAssign {
+	for _, partitionID := range partitionsToAssign {
+		partition := c.partitions[partitionID]
 		for i := 0; i < 3; i++ {
-			err := c.replicate(partition, nodeID)
+			err := c.replicate(partitionID, nodeID)
 			if err == nil {
-				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d\n", partition, nodeID)
+				c.mu.Lock()
+				if partition.Leader == -1 {
+					partition.Leader = nodeID
+				} else {
+					partition.Replicas = append(partition.Replicas, nodeID)
+				}
+				c.mu.Unlock()
+				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d\n", partitionID, nodeID)
 				break
-			}
-			if i == 2 {
-				log.Printf("controller::makeNodeReady: Failed to replicate partition %d to node %d: %v\n", partition, nodeID, err)
+			} else {
+				log.Printf("controller::makeNodeReady: Failed to replicate %d in node %d: %v\n", partitionID, nodeID, err)
 			}
 			time.Sleep(1 * time.Second)
 		}
@@ -161,48 +166,24 @@ func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 }
 
 func (c *Controller) replicate(partitionID, nodeID int) error {
+	var addr string
+	c.mu.RLock()
 	if c.partitions[partitionID].Leader == -1 {
-		c.mu.Lock()
-		addr := fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
-		c.mu.Unlock()
-
-		resp, err := c.doNodeRequest("POST", addr)
-		if err != nil {
-			log.Printf("controller::replicate: Failed to add partition %d to node %d: %v\n", partitionID, nodeID, err)
-			return errors.New("failed to add partition")
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			log.Printf("controller::replicate: Failed to add partition %d to node %d: %s. partition already exists.\n", partitionID, nodeID, resp.Status)
-			return errors.New("failed to add partition")
-		}
-
-		c.mu.Lock()
-		c.partitions[partitionID].Leader = nodeID
-		c.mu.Unlock()
-		log.Printf("controller::replicate: Partition %d leader set to node %d\n", partitionID, nodeID)
-		return nil
+		addr = fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
+	} else {
+		addr = fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress)
 	}
-
-	c.mu.Lock()
-	addr := fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress)
-	c.mu.Unlock()
+	c.mu.RUnlock()
 
 	resp, err := c.doNodeRequest("POST", addr)
 	if err != nil {
-		log.Printf("controller::replicate: Failed to add replica %d to partition %d: %v\n", nodeID, partitionID, err)
-		return errors.New("failed to add replica")
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("controller::replicate: Failed to add replica %d to partition %d: %s\n", nodeID, partitionID, resp.Status)
-		return errors.New("failed to add replica")
+		return errors.New("resp status not OK: " + resp.Status)
 	}
 
-	c.mu.Lock()
-	c.partitions[partitionID].Replicas = append(c.partitions[partitionID].Replicas, nodeID)
-	c.mu.Unlock()
-	log.Printf("controller::replicate: Partition %d replicated to node %d\n", partitionID, nodeID)
 	return nil
 }
 
@@ -223,8 +204,12 @@ func (c *Controller) monitorHeartbeat() {
 		c.mu.Lock()
 		for _, node := range c.nodes {
 			if time.Since(node.lastSeen) > 10*time.Second {
-				log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
-				node.Status = Dead
+				if node.Status == Alive {
+					log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
+					node.Status = Dead
+
+					// go c.handleFailover(node.ID)
+				}
 			}
 		}
 		c.mu.Unlock()
