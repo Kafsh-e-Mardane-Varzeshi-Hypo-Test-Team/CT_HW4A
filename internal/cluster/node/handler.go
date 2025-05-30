@@ -17,6 +17,7 @@ func (n *Node) setupRoutes() {
 	// controller routes
 	n.ginEngine.POST("/add-partition/:partition-id", n.handleAddPartition)
 	n.ginEngine.POST("/set-leader/:partition-id", n.handleSetLeader)
+	n.ginEngine.POST("/set-follower/:partition-id", n.handleSetLeader)
 	n.ginEngine.DELETE("/delete-partition/:partition-id", n.handleDeletePartition)
 	n.ginEngine.POST("/send-partition/:partition-id/:address", n.handleSendPartitionToNode)
 
@@ -56,12 +57,34 @@ func (n *Node) handleSetLeader(c *gin.Context) {
 
 	n.replicasMapMutex.Lock()
 	if _, ok := n.replicas[partitionId]; !ok {
+		n.replicasMapMutex.Unlock()
 		log.Printf("[node.handleAddPartition] partitionId %v does not exist in nodeId %v", partitionId, n.Id)
 		c.JSON(http.StatusConflict, gin.H{"error": "this partitionId does not exist"})
 		return
 	}
 
 	n.replicas[partitionId].ConvertToLeader()
+	n.replicasMapMutex.Unlock()
+	c.JSON(http.StatusOK, nil)
+}
+
+func (n *Node) handleSetFollower(c *gin.Context) {
+	partitionId, err := strconv.Atoi(c.Param("partition-id"))
+	if err != nil {
+		log.Printf("[node.handleAddPartition] error while converting partitionId param to int: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	n.replicasMapMutex.Lock()
+	if _, ok := n.replicas[partitionId]; !ok {
+		n.replicasMapMutex.Unlock()
+		log.Printf("[node.handleAddPartition] partitionId %v does not exist in nodeId %v", partitionId, n.Id)
+		c.JSON(http.StatusConflict, gin.H{"error": "this partitionId does not exist"})
+		return
+	}
+
+	n.replicas[partitionId].ConvertToFollower()
 	n.replicasMapMutex.Unlock()
 	c.JSON(http.StatusOK, nil)
 }
