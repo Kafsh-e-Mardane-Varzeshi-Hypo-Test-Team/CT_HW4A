@@ -17,7 +17,7 @@ func (n *Node) setupRoutes() {
 	// controller routes
 	n.ginEngine.POST("/add-partition/:partition-id", n.handleAddPartition)
 	n.ginEngine.POST("/set-leader/:partition-id", n.handleSetLeader)
-	n.ginEngine.POST("/set-follower/:partition-id", n.handleSetLeader)
+	n.ginEngine.POST("/set-follower/:partition-id", n.handleSetFollower)
 	n.ginEngine.DELETE("/delete-partition/:partition-id", n.handleDeletePartition)
 	n.ginEngine.POST("/send-partition/:partition-id/:address", n.handleSendPartitionToNode)
 

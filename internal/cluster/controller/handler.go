@@ -147,9 +147,7 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 	c.mu.Unlock()
 
 	c.changeLeader(req.PartitionID, req.NodeID)
-
-	partition.Leader = req.NodeID
-	c.mu.Unlock()
+	
 	ctx.JSON(http.StatusOK, gin.H{"message": "Leader set successfully"})
 	log.Printf("controller::handleSetLeader: Node %d is now the leader for partition %d\n", req.NodeID, req.PartitionID)
 }

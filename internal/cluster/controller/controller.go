@@ -337,6 +337,12 @@ func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 		}
 	}
 
+	// add old leader to replicas
+	if oldLeaderID != -1 && oldLeaderID != newLeaderID {
+		partition.Replicas = append(partition.Replicas, oldLeaderID)
+		log.Printf("controller::changeLeader: Added old leader %d to replicas of partition %d\n", oldLeaderID, partitionID)
+	}
+
 	partition.Leader = newLeaderID
 	log.Printf("controller::changeLeader: Partition %d leader changed to node %d\n", partitionID, newLeaderID)
 
