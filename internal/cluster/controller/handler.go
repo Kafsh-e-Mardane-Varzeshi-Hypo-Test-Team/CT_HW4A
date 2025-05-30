@@ -16,6 +16,9 @@ func (c *Controller) setupRoutes() {
 	c.ginEngine.POST("/node-heartbeat", c.handleHeartbeat)
 
 	c.ginEngine.POST("/nodes", c.handleRegisterNode)
+
+	c.ginEngine.POST("/partitions/move-replica", c.handleMoveReplica)
+	c.ginEngine.POST("/partitions/set-leader", c.handleSetLeader)
 }
 
 func (c *Controller) Run(addr string) error {
@@ -100,7 +103,55 @@ func (c *Controller) handleRemoveNode(ctx *gin.Context) {
 }
 
 func (c *Controller) handleSetLeader(ctx *gin.Context) {
+	var req struct {
+		PartitionID int `json:"partition_id"`
+		NodeID      int `json:"node_id"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
 
+	c.mu.Lock()
+	if req.PartitionID < 0 || req.PartitionID >= len(c.partitions) {
+		c.mu.Unlock()
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
+		return
+	}
+	if req.NodeID < 0 || req.NodeID >= len(c.nodes) || c.nodes[req.NodeID].Status != Alive {
+		c.mu.Unlock()
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid node ID"})
+		return
+	}
+
+	if c.partitions[req.PartitionID].Leader == req.NodeID {
+		c.mu.Unlock()
+		ctx.JSON(http.StatusOK, gin.H{"message": "Node is already the leader"})
+		return
+	}
+
+	// Check if the new leader is already a replica, if not error
+	partition := c.partitions[req.PartitionID]
+	exists := false
+	for _, replica := range partition.Replicas {
+		if replica == req.NodeID {
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		c.mu.Unlock()
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Node is not a replica of the partition"})
+		return
+	}
+	c.mu.Unlock()
+
+	c.changeLeader(req.PartitionID, req.NodeID)
+
+	partition.Leader = req.NodeID
+	c.mu.Unlock()
+	ctx.JSON(http.StatusOK, gin.H{"message": "Leader set successfully"})
+	log.Printf("controller::handleSetLeader: Node %d is now the leader for partition %d\n", req.NodeID, req.PartitionID)
 }
 
 func (c *Controller) handleRebalance(ctx *gin.Context) {
