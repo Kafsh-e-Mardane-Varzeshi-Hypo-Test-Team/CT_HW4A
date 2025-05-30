@@ -118,11 +118,6 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
 		return
 	}
-	if req.NodeID < 0 || req.NodeID >= len(c.nodes) || c.nodes[req.NodeID].Status != Alive {
-		c.mu.Unlock()
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid node ID"})
-		return
-	}
 
 	if c.partitions[req.PartitionID].Leader == req.NodeID {
 		c.mu.Unlock()
@@ -147,7 +142,7 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 	c.mu.Unlock()
 
 	c.changeLeader(req.PartitionID, req.NodeID)
-	
+
 	ctx.JSON(http.StatusOK, gin.H{"message": "Leader set successfully"})
 	log.Printf("controller::handleSetLeader: Node %d is now the leader for partition %d\n", req.NodeID, req.PartitionID)
 }

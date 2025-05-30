@@ -204,7 +204,7 @@ func (c *Controller) monitorHeartbeat() {
 	for {
 		c.mu.Lock()
 		for _, node := range c.nodes {
-			if time.Since(node.lastSeen) > 10*time.Second {
+			if time.Since(node.lastSeen) > 5*time.Second {
 				if node.Status == Alive {
 					log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
 					node.Status = Dead
@@ -215,7 +215,7 @@ func (c *Controller) monitorHeartbeat() {
 		}
 		c.mu.Unlock()
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 }
 

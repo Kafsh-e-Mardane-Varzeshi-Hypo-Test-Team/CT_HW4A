@@ -45,7 +45,7 @@ func NewLoadBalancer(controllerAddr string) *LoadBalancer {
 			},
 		},
 		ginEngine:       router,
-		refreshInterval: 30 * time.Second,
+		refreshInterval: 10 * time.Second,
 		requestTimeout:  2 * time.Second,
 		maxRetries:      3,
 	}
