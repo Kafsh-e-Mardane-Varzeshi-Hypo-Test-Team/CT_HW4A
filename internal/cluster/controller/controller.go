@@ -291,3 +291,54 @@ func (c *Controller) reviveNode(nodeID int) {
 	c.mu.Unlock()
 	log.Printf("controller::reviveNode: Node %d revived successfully\n", nodeID)
 }
+
+func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	partition := c.partitions[partitionID]
+
+	// notify the old leader to become follower
+	oldLeaderID := partition.Leader
+	if oldLeaderID != -1 {
+		addr := fmt.Sprintf("%s/set-follower/%d", c.nodes[oldLeaderID].HttpAddress, partitionID)
+		resp, err := c.doNodeRequest("POST", addr)
+		if err != nil {
+			log.Printf("controller::changeLeader: Failed to notify old leader %d for partition %d: %v\n", oldLeaderID, partitionID, err)
+			return fmt.Errorf("failed to notify old leader")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("controller::changeLeader: Failed to set old leader %d as follower for partition %d: %s\n", oldLeaderID, partitionID, resp.Status)
+			return fmt.Errorf("failed to set old leader as follower for partition %d: %v", partitionID, resp.Status)
+		}
+		log.Printf("controller::changeLeader: Node %d is now a follower for partition %d\n", oldLeaderID, partitionID)
+	}
+
+	// notify the new leader to take over
+	addr := fmt.Sprintf("%s/set-leader/%d", c.nodes[newLeaderID].HttpAddress, partitionID)
+	resp, err := c.doNodeRequest("POST", addr)
+	if err != nil {
+		log.Printf("controller::changeLeader: Failed to notify new leader for partition %d: %v\n", partitionID, err)
+		return fmt.Errorf("failed to notify new leader")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("controller::changeLeader: Failed to set new leader for partition %d: %s\n", partitionID, resp.Status)
+		return fmt.Errorf("failed to set new leader for partition %d: %v", partitionID, resp.Status)
+	}
+
+	// remove new leader from replicas
+	for i, replica := range partition.Replicas {
+		if replica == newLeaderID {
+			partition.Replicas = append(partition.Replicas[:i], partition.Replicas[i+1:]...)
+			log.Printf("controller::changeLeader: Removed node %d from replicas of partition %d\n", newLeaderID, partitionID)
+			break
+		}
+	}
+
+	partition.Leader = newLeaderID
+	log.Printf("controller::changeLeader: Partition %d leader changed to node %d\n", partitionID, newLeaderID)
+
+	return nil
+}
