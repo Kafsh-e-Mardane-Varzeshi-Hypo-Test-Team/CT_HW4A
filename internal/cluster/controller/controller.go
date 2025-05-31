@@ -117,6 +117,8 @@ func (c *Controller) removeNode(nodeID int) error {
 		return errors.New("node not found")
 	}
 
+	delete(c.nodes, nodeID)
+
 	// Stop and remove the docker container
 	err := c.dockerClient.RemoveNodeContainer(nodeID)
 	if err != nil {
@@ -124,7 +126,6 @@ func (c *Controller) removeNode(nodeID int) error {
 		return err
 	}
 
-	delete(c.nodes, nodeID)
 	log.Printf("controller::removeNode: Node %d removed successfully\n", nodeID)
 
 	return nil

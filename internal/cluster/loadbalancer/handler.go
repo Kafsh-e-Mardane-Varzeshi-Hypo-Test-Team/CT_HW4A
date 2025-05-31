@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -44,16 +45,18 @@ func (lb *LoadBalancer) handleGet(c *gin.Context) {
 		if err == nil {
 			defer resp.Body.Close()
 			responseBody, err = io.ReadAll(resp.Body)
-			if err == nil {
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 				break
 			}
 		}
 
+		log.Printf("Error during request to %s for partition %d: %v", nodeAddr, partitionID, err)
 		if i < lb.maxRetries-1 {
 			lb.refreshMetadata()
-			nodeAddr, _ = lb.getReplicaForRead(partitionID)
-			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			nodeAddr, _ = lb.getLeaderForPartition(partitionID)
+			time.Sleep(200 * time.Millisecond)
 		}
+		log.Printf("Retrying request to %s for partition %d, attempt %d", nodeAddr, partitionID, i+1)
 	}
 
 	if err != nil {
@@ -84,16 +87,18 @@ func (lb *LoadBalancer) handleSet(c *gin.Context) {
 		if err == nil {
 			defer resp.Body.Close()
 			responseBody, err = io.ReadAll(resp.Body)
-			if err == nil {
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 				break
 			}
 		}
 
+		log.Printf("Error during request to %s for partition %d: %v", leaderAddr, partitionID, err)
 		if i < lb.maxRetries-1 {
 			lb.refreshMetadata()
 			leaderAddr, _ = lb.getLeaderForPartition(partitionID)
-			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
+		log.Printf("Retrying request to %s for partition %d, attempt %d", leaderAddr, partitionID, i+1)
 	}
 
 	if err != nil {
@@ -121,16 +126,18 @@ func (lb *LoadBalancer) handleDelete(c *gin.Context) {
 		if err == nil {
 			defer resp.Body.Close()
 			responseBody, err = io.ReadAll(resp.Body)
-			if err == nil {
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 				break
 			}
 		}
 
+		log.Printf("Error during request to %s for partition %d: %v", leaderAddr, partitionID, err)
 		if i < lb.maxRetries-1 {
 			lb.refreshMetadata()
 			leaderAddr, _ = lb.getLeaderForPartition(partitionID)
-			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
+		log.Printf("Retrying request to %s for partition %d, attempt %d", leaderAddr, partitionID, i+1)
 	}
 
 	if err != nil {
