@@ -108,6 +108,28 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	return nil
 }
 
+func (c *Controller) removeNode(nodeID int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, exists := c.nodes[nodeID]
+	if !exists {
+		return errors.New("node not found")
+	}
+
+	// Stop and remove the docker container
+	err := c.dockerClient.RemoveNodeContainer(nodeID)
+	if err != nil {
+		log.Printf("controller::removeNode: Failed to remove docker container for node %d: %v\n", nodeID, err)
+		return err
+	}
+
+	delete(c.nodes, nodeID)
+	log.Printf("controller::removeNode: Node %d removed successfully\n", nodeID)
+
+	return nil
+}
+
 func (c *Controller) Start(addr string) error {
 	if err := c.RegisterNode(1); err != nil {
 		log.Fatalf("Failed to create initial node: %v", err)
@@ -226,7 +248,6 @@ func (c *Controller) handleFailover(nodeID int) {
 	defer c.mu.Unlock()
 	node, exists := c.nodes[nodeID]
 	if !exists || node.Status != Dead {
-		c.mu.Unlock()
 		return
 	}
 

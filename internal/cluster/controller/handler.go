@@ -15,10 +15,11 @@ func (c *Controller) setupRoutes() {
 
 	c.ginEngine.POST("/node-heartbeat", c.handleHeartbeat)
 
-	c.ginEngine.POST("/nodes", c.handleRegisterNode)
+	c.ginEngine.POST("/node/add", c.handleRegisterNode)
+	c.ginEngine.POST("/node/remove", c.handleRemoveNode)
 
-	c.ginEngine.POST("/partitions/move-replica", c.handleMoveReplica)
-	c.ginEngine.POST("/partitions/set-leader", c.handleSetLeader)
+	c.ginEngine.POST("/partition/move-replica", c.handleMoveReplica)
+	c.ginEngine.POST("/partition/set-leader", c.handleSetLeader)
 }
 
 func (c *Controller) Run(addr string) error {
@@ -99,7 +100,31 @@ func (c *Controller) handleRegisterNode(ctx *gin.Context) {
 }
 
 func (c *Controller) handleRemoveNode(ctx *gin.Context) {
+	nodeID, err := strconv.Atoi(ctx.PostForm("NodeID"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid node ID"})
+		return
+	}
 
+	c.mu.Lock()
+	if _, exists := c.nodes[nodeID]; !exists {
+		c.mu.Unlock()
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		return
+	}
+	c.nodes[nodeID].Status = Dead
+	c.mu.Unlock()
+
+	c.handleFailover(nodeID)
+
+	err = c.removeNode(nodeID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove node"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Node removed successfully"})
+	log.Printf("controller::handleRemoveNode: Node %d removed\n", nodeID)
 }
 
 func (c *Controller) handleSetLeader(ctx *gin.Context) {
