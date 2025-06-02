@@ -177,7 +177,54 @@ func (c *Controller) handleRebalance(ctx *gin.Context) {
 }
 
 func (c *Controller) handleMoveReplica(ctx *gin.Context) {
+	var req struct {
+		PartitionID int `json:"partition_id"`
+		From        int `json:"from"`
+		To          int `json:"to"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
 
+	c.mu.RLock()
+	if req.PartitionID < 0 || req.PartitionID >= len(c.partitions) {
+		c.mu.RUnlock()
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
+		return
+	}
+
+	partition := c.partitions[req.PartitionID]
+
+	isLeader := false
+	if partition.Leader == req.From {
+		isLeader = true
+	} else {
+		exists := false
+		for _, replica := range partition.Replicas {
+			if replica == req.From {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			c.mu.RUnlock()
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Replica not found in partition"})
+			return
+		}
+	}
+	c.mu.RUnlock()
+
+	log.Printf("controller::handleMoveReplica: Moving replica from node %d to node %d for partition %d\n", req.From, req.To, req.PartitionID)
+	c.replicate(req.PartitionID, req.To)
+	if isLeader {
+		c.changeLeader(req.PartitionID, req.To)
+		log.Printf("controller::handleMoveReplica: Node %d is now the leader for partition %d after moving replica\n", req.To, req.PartitionID)
+	}
+	c.removePartitionReplica(req.PartitionID, req.From)
+
+	log.Printf("controller::handleMoveReplica: Replica moved from node %d to node %d for partition %d\n", req.From, req.To, req.PartitionID)
+	ctx.JSON(http.StatusOK, gin.H{"message": "Replica moved successfully"})
 }
 
 func (c *Controller) handleReadyCheck(ctx *gin.Context) {
