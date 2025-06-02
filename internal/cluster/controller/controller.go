@@ -370,3 +370,35 @@ func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 
 	return nil
 }
+
+func (c *Controller) removePartitionReplica(partitionID, nodeID int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	partition := c.partitions[partitionID]
+	if partition == nil {
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
+
+	for i, replica := range partition.Replicas {
+		if replica == nodeID {
+			partition.Replicas = append(partition.Replicas[:i], partition.Replicas[i+1:]...)
+			log.Printf("controller::removePartitionReplica: Removed node %d from replicas of partition %d\n", nodeID, partitionID)
+			return nil
+		}
+	}
+
+	addr := fmt.Sprintf("%s/delete-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
+
+	resp, err := c.doNodeRequest("POST", addr)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.New("resp status not OK: " + resp.Status)
+	}
+
+	log.Printf("controller::removePartitionReplica: Node %d removed from partition %d successfully\n", nodeID, partitionID)
+	return nil
+}
