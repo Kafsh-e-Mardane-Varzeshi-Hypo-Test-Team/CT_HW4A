@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/gob"
 	"fmt"
 	"log"
@@ -12,11 +13,12 @@ import (
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 const (
 	REQUEST_TIMEOUT = 2 * time.Second
-	HEARTBEAT_TIMER = 2 * time.Second
+	HEARTBEAT_TIMER = 2
 	HTTP_ADDRESS    = "0.0.0.0:8000"
 	TCP_ADDRESS     = "0.0.0.0:9000"
 )
@@ -63,11 +65,26 @@ func NewNode(id int, endpoints []string) *Node {
 
 func (n *Node) Start() {
 	defer n.etcdClient.Close()
-	go n.startHeartbeat(HEARTBEAT_TIMER)
+
+	log.Println("[node.Start] Attempting to create etcd session...")
+	session, err := concurrency.NewSession(n.etcdClient, concurrency.WithTTL(5))
+	if err != nil {
+		log.Fatalf("[node.Start] ETCD SESSION FAILED: %v", err)
+	}
+	log.Println("[node.Start] etcd session created successfully!")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	n.etcdClient.Put(ctx, fmt.Sprintf("nodes/node-%d", n.Id), "baghojenanash", clientv3.WithLease(session.Lease()))
+	defer cancel()
+
+	go n.startHeartbeat(time.Duration(HEARTBEAT_TIMER * time.Second))
 	go n.tcpListener(n.nodeConnectionHandler)
 
 	n.setupRoutes()
-	n.ginEngine.Run(HTTP_ADDRESS)
+	log.Printf("Starting HTTP server on %s...", HTTP_ADDRESS)
+	if err := n.ginEngine.Run(HTTP_ADDRESS); err != nil {
+		log.Fatalf("HTTP server failed: %v", err)
+	}
 }
 
 func (n *Node) tcpListener(handler func(Message) Response) {
