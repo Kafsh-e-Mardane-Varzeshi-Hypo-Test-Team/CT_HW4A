@@ -19,7 +19,10 @@ func main() {
 		log.Fatalf("[main (node)] failed to get 'NODE-ID' env variable: %v", err)
 	}
 
-	n := node.NewNode(id)
+	// TODO: read etcd endpoints from env file or sth
+	etcdEndpoints := []string{"http://etcd-1:2379", "http://etcd-2:2379", "http://etcd-3:2379"}
+
+	n := node.NewNode(id, etcdEndpoints)
 	n.Start()
 }
 

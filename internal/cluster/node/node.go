@@ -11,6 +11,7 @@ import (
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -27,12 +28,21 @@ type Node struct {
 	replicasMapMutex sync.RWMutex
 	ginEngine        *gin.Engine
 	httpClient       *http.Client
+	etcdClient       *clientv3.Client
 }
 
-func NewNode(id int) *Node {
+func NewNode(id int, endpoints []string) *Node {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		log.Printf("[node.NewNode] Failed to create etcd client: %v", err)
+	}
 
 	return &Node{
 		Id:               id,
@@ -47,10 +57,12 @@ func NewNode(id int) *Node {
 				DisableCompression: false,
 			},
 		},
+		etcdClient: cli,
 	}
 }
 
 func (n *Node) Start() {
+	defer n.etcdClient.Close()
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 	go n.tcpListener(n.nodeConnectionHandler)
 
