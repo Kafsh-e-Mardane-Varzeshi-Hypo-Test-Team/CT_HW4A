@@ -29,7 +29,7 @@ services:
         condition: service_started
 
   node:
-    image: ct_hw3-node:latest
+    image: ct_hw4a-node:latest
     build:
       context: .
       dockerfile: ./cmd/node/Dockerfile
@@ -37,7 +37,7 @@ services:
       - build_only
   
   client:
-    image: ct_hw3-client:latest
+    image: ct_hw4a-client:latest
     build:
       context: .
       dockerfile: ./cmd/client/Dockerfile

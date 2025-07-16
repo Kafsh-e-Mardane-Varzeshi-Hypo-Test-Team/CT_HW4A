@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/loadbalancer"
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/loadbalancer"
 )
 
 func main() {
