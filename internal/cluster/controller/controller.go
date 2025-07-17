@@ -15,6 +15,7 @@ import (
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/controller/docker"
 	"github.com/docker/go-connections/nat"
 	"github.com/gin-gonic/gin"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type Controller struct {
@@ -23,17 +24,29 @@ type Controller struct {
 	mu                sync.RWMutex
 	partitionCount    int
 	replicationFactor int
-	nodes             map[int]*NodeMetadata
-	partitions        []*PartitionMetadata
-	httpClient        *http.Client
-	networkName       string
-	nodeImage         string
+
+	nodes      map[int]*NodeMetadata
+	partitions []*PartitionMetadata
+
+	etcdClient *clientv3.Client
+
+	httpClient  *http.Client
+	networkName string
+	nodeImage   string
 }
 
-func NewController(dockerClient *docker.DockerClient, partitionCount, replicationFactor int, networkName, nodeImage string) *Controller {
+func NewController(dockerClient *docker.DockerClient, partitionCount, replicationFactor int, networkName, nodeImage string, endpoints []string) *Controller {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		log.Printf("[node.NewNode] Failed to create etcd client: %v", err)
+	}
 
 	c := &Controller{
 		dockerClient:      dockerClient,
@@ -50,6 +63,7 @@ func NewController(dockerClient *docker.DockerClient, partitionCount, replicatio
 				DisableCompression: false,
 			},
 		},
+		etcdClient:  cli,
 		networkName: networkName,
 		nodeImage:   nodeImage,
 	}
