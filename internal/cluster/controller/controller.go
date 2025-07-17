@@ -29,8 +29,7 @@ type Controller struct {
 	partitionCount    int
 	replicationFactor int
 
-	nodes      map[int]*NodeMetadata
-	partitions []*PartitionMetadata
+	nodes map[int]*NodeMetadata
 
 	etcdClient *clientv3.Client
 	election   *concurrency.Election
@@ -40,7 +39,7 @@ type Controller struct {
 	nodeImage   string
 }
 
-func NewController(id int, dockerClient *docker.DockerClient, partitionCount, replicationFactor int, networkName, nodeImage string, endpoints []string) *Controller {
+func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeImage string, endpoints []string) *Controller {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -50,14 +49,45 @@ func NewController(id int, dockerClient *docker.DockerClient, partitionCount, re
 		DialTimeout: 5 * time.Second,
 	})
 	if err != nil {
-		log.Fatalf("[node.NewNode] Failed to create etcd client: %v", err)
+		log.Fatalf("controller::NewController Failed to create etcd client: %v", err)
 	}
 
 	session, err := concurrency.NewSession(cli, concurrency.WithTTL(5))
 	if err != nil {
-		log.Fatalf("controller::Start: failed to create etcd session, %v", err)
+		log.Fatalf("controller::NewController: failed to create etcd session, %v", err)
 	}
 	election := concurrency.NewElection(session, "controller/leader")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	var partitionCount int
+	getResp, err := cli.Get(ctx, "partitions/count")
+	if err != nil {
+		log.Fatalf("controller::NewController: failed to get partition counts, %v", err)
+	}
+	if len(getResp.Kvs) > 0 {
+		partitionCount, err = strconv.Atoi(string(getResp.Kvs[0].Value))
+		if err != nil {
+			log.Fatalln("controller::NewController: failed to parse partition counts, %v", err)
+		}
+	} else {
+		partitionCount = 1
+	}
+
+	var replicationFactor int
+	getResp, err = cli.Get(ctx, "replicas/count")
+	if err != nil {
+		log.Fatalf("controller::NewController: failed to get replication factor, %v", err)
+	}
+	if len(getResp.Kvs) > 0 {
+		replicationFactor, err = strconv.Atoi(string(getResp.Kvs[0].Value))
+		if err != nil {
+			log.Fatalln("controller::NewController: failed to parse replication factor, %v", err)
+		}
+	} else {
+		replicationFactor = 1
+	}
 
 	c := &Controller{
 		id:                id,
@@ -65,8 +95,9 @@ func NewController(id int, dockerClient *docker.DockerClient, partitionCount, re
 		ginEngine:         router,
 		partitionCount:    partitionCount,
 		replicationFactor: replicationFactor,
-		nodes:             make(map[int]*NodeMetadata),
-		partitions:        make([]*PartitionMetadata, partitionCount),
+
+		nodes: make(map[int]*NodeMetadata),
+
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: &http.Transport{
@@ -79,14 +110,6 @@ func NewController(id int, dockerClient *docker.DockerClient, partitionCount, re
 		election:    election,
 		networkName: networkName,
 		nodeImage:   nodeImage,
-	}
-
-	for i := range partitionCount {
-		c.partitions[i] = &PartitionMetadata{
-			PartitionID: i,
-			Leader:      -1, // Will be set when first node joins
-			Replicas:    make([]int, 0),
-		}
 	}
 
 	c.setupRoutes()
@@ -229,6 +252,8 @@ func (c *Controller) Start(addr string) {
 		log.Fatalf("controller::Start: failed to campaign for leader election, %v", err)
 	}
 	log.Printf("I'm the leader, controller-%d", c.id)
+
+	// Check if we need initialization
 
 	go c.monitorHeartbeat()
 	go func() {
