@@ -153,6 +153,15 @@ func (c *Controller) Start(addr string) {
 	defer stop()
 
 	go c.monitorHeartbeat()
+	go func() {
+		ch := c.etcdClient.Watch(context.Background(), "nodes/", clientv3.WithPrefix())
+		for resp := range ch {
+			for _, event := range resp.Events {
+				log.Printf("controller::Start: node status modified: %v, %v", event.Type, event.Kv.Key)
+				// TODO: implement type DELETE and PUT
+			}
+		}
+	}()
 
 	go func() {
 		if err := c.ginEngine.Run(addr); err != nil {
