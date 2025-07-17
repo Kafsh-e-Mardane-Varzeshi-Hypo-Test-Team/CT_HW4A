@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/controller/docker"
@@ -131,20 +134,25 @@ func (c *Controller) removeNode(nodeID int) error {
 	return nil
 }
 
-func (c *Controller) Start(addr string) error {
-	if err := c.RegisterNode(1); err != nil {
-		log.Fatalf("Failed to create initial node: %v", err)
-	}
+func (c *Controller) Start(addr string) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	go c.monitorHeartbeat()
+	go func() {
+		if err := c.ginEngine.Run(addr); err != nil {
+			log.Fatalf("controller::Start: Failed to run http server %v", err)
+		}
+	}()
 
-	err := c.Run(addr)
-	if err != nil {
-		log.Printf("controller::Start: Failed to run http server")
-		return err
-	}
+	go func() {
+		if err := c.RegisterNode(1); err != nil {
+			log.Fatalf("controller::Start: Failed to create initial node: %v", err)
+		}
+	}()
 
-	return nil
+	<-ctx.Done()
+	log.Printf("controller::Start: Shutting down gracefully...")
+	// TODO: shutting down node containers
 }
 
 func (c *Controller) makeNodeReady(nodeID int) {
