@@ -175,15 +175,33 @@ func (c *Controller) Start(addr string) {
 		ch := c.etcdClient.Watch(context.Background(), "nodes/active/", clientv3.WithPrefix())
 		for resp := range ch {
 			for _, event := range resp.Events {
-				log.Printf("controller::Start: node status modified: %v", event)
 				if event.Type == clientv3.EventTypeDelete {
 					nodeId, err := strconv.Atoi(string(event.Kv.Key)[len("nodes/active/"):])
 					if err != nil {
-						log.Printf("controller::Start: Failed to parse node ID from etcd key: %v", err)
+						log.Printf("controller::Start: Failed to parse node ID: %v", err)
 						continue
 					}
-					log.Printf("controller::Start: Node %d removed from etcd\n", nodeId)
-					// go c.handleFailover(nodeId)
+
+					txnResp, err := c.etcdClient.Txn(context.Background()).
+						If(clientv3.Compare(
+							clientv3.CreateRevision(c.election.Key()),
+							"=",
+							c.election.Rev(),
+						)).
+						Then(clientv3.OpGet("dummy_key")).
+						Commit()
+
+					if err != nil {
+						log.Printf("controller::Start: Leadership verification failed: %v", err)
+						continue
+					}
+
+					if txnResp.Succeeded {
+						log.Printf("controller::Start: Leader processing failover for node %d", nodeId)
+						go c.handleFailover(nodeId)
+					} else {
+						log.Printf("controller::Start: Not leader anymore, ignoring node %d failover", nodeId)
+					}
 				}
 			}
 		}
@@ -285,12 +303,12 @@ func (c *Controller) monitorHeartbeat() {
 	for {
 		c.mu.Lock()
 		for _, node := range c.nodes {
-			if time.Since(node.lastSeen) > 5*time.Second {
+			if time.Since(node.lastSeen) > 3*time.Second {
 				if node.Status == Alive {
 					log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
 					node.Status = Dead
 
-					go c.handleFailover(node.ID)
+					// go c.handleFailover(node.ID)
 				}
 			}
 		}
