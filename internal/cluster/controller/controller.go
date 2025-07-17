@@ -62,7 +62,7 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 	defer cancel()
 
 	var partitionCount int
-	getResp, err := cli.Get(ctx, "partitions/count")
+	getResp, err := cli.Get(ctx, "factor/partitions")
 	if err != nil {
 		log.Fatalf("controller::NewController: failed to get partition counts, %v", err)
 	}
@@ -76,7 +76,7 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 	}
 
 	var replicationFactor int
-	getResp, err = cli.Get(ctx, "replicas/count")
+	getResp, err = cli.Get(ctx, "factor/replication")
 	if err != nil {
 		log.Fatalf("controller::NewController: failed to get replication factor, %v", err)
 	}
@@ -87,6 +87,44 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 		}
 	} else {
 		replicationFactor = 1
+	}
+
+	getResp, err = cli.Get(context.Background(), "partitions/", clientv3.WithPrefix(), clientv3.WithCountOnly())
+	if err != nil {
+		log.Fatalf("failed to check existing partitions: %v", err)
+	}
+	if getResp.Count == 0 {
+		txnOps := make([]clientv3.Op, 0, partitionCount)
+		for i := 0; i < partitionCount; i++ {
+			partition := &PartitionMetadata{
+				PartitionID: i,
+				Leader:      -1,
+				Replicas:    []int{},
+			}
+			data, _ := json.Marshal(partition)
+			txnOps = append(txnOps,
+				clientv3.OpPut(
+					fmt.Sprintf("partitions/%d", i),
+					string(data),
+				))
+		}
+
+		txnResp, err := cli.Txn(context.Background()).
+			If(clientv3.Compare(
+				clientv3.Version("partitions/0"),
+				"=",
+				0,
+			)).
+			Then(txnOps...).
+			Commit()
+
+		if err != nil {
+			log.Printf("partition initialization failed: %v", err)
+		}
+
+		if !txnResp.Succeeded {
+			log.Printf("partitions already exist")
+		}
 	}
 
 	c := &Controller{
@@ -310,13 +348,22 @@ func (c *Controller) Start(addr string) {
 
 func (c *Controller) makeNodeReady(nodeID int) {
 	partitionsToAssign := make([]int, 0)
-	c.mu.Lock()
-	for _, partition := range c.partitions {
+	resp, err := c.etcdClient.Get(context.Background(), "partitions/", clientv3.WithPrefix())
+	if err != nil {
+		log.Printf("controller::makeNodeReady: failed to get partitions to assign: %w", err)
+		return
+	}
+
+	for _, kv := range resp.Kvs {
+		var partition PartitionMetadata
+		if err := json.Unmarshal(kv.Value, &partition); err != nil {
+			continue
+		}
+
 		if len(partition.Replicas) < c.replicationFactor {
 			partitionsToAssign = append(partitionsToAssign, partition.PartitionID)
 		}
 	}
-	c.mu.Unlock()
 
 	c.replicatePartitions(partitionsToAssign, nodeID)
 
