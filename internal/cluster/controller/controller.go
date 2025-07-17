@@ -127,6 +127,7 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		return errors.New("not leader or node already exists")
 	}
 
+	//===================================================
 	c.mu.Lock()
 	if _, exists := c.nodes[nodeID]; exists {
 		c.mu.Unlock()
@@ -138,6 +139,7 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		Status: Creating,
 	}
 	c.mu.Unlock()
+	//====================================================
 
 	// Create a new docker container for the node
 	imageName := c.nodeImage
@@ -157,12 +159,38 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		return errors.New("failed to create container")
 	}
 
+	nodeMetadata.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
+	nodeMetadata.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
+	nodeMetadata.Status = Syncing
+
+	nodeJSON, err = json.Marshal(nodeMetadata)
+	if err != nil {
+		log.Printf("controller::RegisterNode: Failed to marshal node metadata: %v\n", err)
+		return errors.New("failed to marshal node metadata")
+	}
+
+	txnResp, err = c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpPut(key, string(nodeJSON)),
+	).Commit()
+
+	if err != nil {
+		return fmt.Errorf("etcd transaction failed: %w", err)
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::RegisterNode: Not leader")
+		return errors.New("not leader")
+	}
+	//====================================================
 	c.mu.Lock()
 	node := c.nodes[nodeID]
 	node.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
 	node.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
 	node.Status = Syncing
 	c.mu.Unlock()
+	//====================================================
 
 	go c.makeNodeReady(nodeID)
 
