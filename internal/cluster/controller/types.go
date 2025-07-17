@@ -1,6 +1,9 @@
 package controller
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type NodeStatus string
 
@@ -24,4 +27,14 @@ type PartitionMetadata struct {
 	PartitionID int   `json:"partitionId"`
 	Leader      int   `json:"leader"`
 	Replicas    []int `json:"replicas"`
+}
+
+func (n *NodeMetadata) ToJson() string {
+	data, _ := json.Marshal(n)
+	return string(data)
+}
+
+func (p *PartitionMetadata) ToJson() string {
+	data, _ := json.Marshal(p)
+	return string(data)
 }
