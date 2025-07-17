@@ -22,10 +22,6 @@ func (c *Controller) setupRoutes() {
 	c.ginEngine.POST("/partition/set-leader", c.handleSetLeader)
 }
 
-func (c *Controller) Run(addr string) error {
-	return c.ginEngine.Run(addr)
-}
-
 func (c *Controller) handleGetMetadata(ctx *gin.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
