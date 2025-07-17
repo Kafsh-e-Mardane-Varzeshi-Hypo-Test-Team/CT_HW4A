@@ -492,47 +492,129 @@ func (c *Controller) monitorHeartbeat() {
 }
 
 func (c *Controller) handleFailover(nodeID int) {
-	log.Printf("controller::handleFailover: Handling failover for node %d\n", nodeID)
+	log.Printf("Starting failover for node %d", nodeID)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	node, exists := c.nodes[nodeID]
-	if !exists || node.Status != Dead {
+	nodeKey := fmt.Sprintf("/nodes/%d", nodeID)
+	resp, err := c.etcdClient.Get(context.Background(), nodeKey)
+	if err != nil {
+		log.Printf("failed to check node status: %v", err)
+		return
+	}
+
+	if len(resp.Kvs) == 0 {
+		log.Printf("node does not exist")
+		return
+	}
+
+	var node NodeMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
+		log.Printf("invalid node data: %v", err)
+		return
+	}
+
+	if node.Status != Dead {
 		return
 	}
 
 	for _, partitionID := range node.partitions {
-		if c.partitions[partitionID].Leader == nodeID {
-			// set another node as leader
-			if len(c.partitions[partitionID].Replicas) > 0 {
-				newLeader := c.partitions[partitionID].Replicas[0]
-				c.partitions[partitionID].Leader = newLeader
-				log.Printf("controller::handleFailover: Node %d is now the leader for partition %d\n", newLeader, partitionID)
-				// notify the new leader to take over
-				addr := fmt.Sprintf("%s/set-leader/%d", c.nodes[newLeader].HttpAddress, partitionID)
-				resp, err := c.doNodeRequest("POST", addr)
-				if err != nil {
-					log.Printf("controller::handleFailover: Failed to notify new leader for partition %d: %v\n", partitionID, err)
-					continue
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusOK {
-					log.Printf("controller::handleFailover: Failed to set new leader for partition %d: %s\n", partitionID, resp.Status)
-				} else {
-					log.Printf("controller::handleFailover: New leader for partition %d is node %d\n", partitionID, newLeader)
-					// remove replica[0]
-					c.partitions[partitionID].Replicas = c.partitions[partitionID].Replicas[1:]
-				}
-			}
-		} else {
-			// remove this node from replicas
-			for i, replica := range c.partitions[partitionID].Replicas {
-				if replica == nodeID {
-					c.partitions[partitionID].Replicas = append(c.partitions[partitionID].Replicas[:i], c.partitions[partitionID].Replicas[i+1:]...)
-					break
-				}
-			}
+		if err := c.handlePartitionFailover(partitionID, nodeID); err != nil {
+			log.Printf("Failed to handle partition %d: %v", partitionID, err)
+			continue
 		}
+	}
+}
+
+func (c *Controller) handlePartitionFailover(partitionID, deadNodeID int) error {
+	partitionKey := fmt.Sprintf("partitions/%d", partitionID)
+
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, err := c.etcdClient.Get(context.Background(), partitionKey)
+		if err != nil {
+			return fmt.Errorf("failed to get partition %d: %w", partitionID, err)
+		}
+
+		if len(resp.Kvs) == 0 {
+			return fmt.Errorf("partition %d not found", partitionID)
+		}
+
+		var partition PartitionMetadata
+		if err := json.Unmarshal(resp.Kvs[0].Value, &partition); err != nil {
+			return fmt.Errorf("invalid partition data: %w", err)
+		}
+
+		var ops []clientv3.Op
+		var newLeader int = -1
+
+		if partition.Leader == deadNodeID {
+			if len(partition.Replicas) == 0 {
+				return fmt.Errorf("no available replicas for partition %d", partitionID)
+			}
+
+			newLeader = partition.Replicas[0]
+			partition.Leader = newLeader
+			partition.Replicas = partition.Replicas[1:]
+			ops = append(ops, clientv3.OpPut(partitionKey, partition.ToJson()))
+
+			go c.notifyNewLeader(newLeader, partitionID)
+		} else {
+			newReplicas := make([]int, 0, len(partition.Replicas)-1)
+			for _, r := range partition.Replicas {
+				if r != deadNodeID {
+					newReplicas = append(newReplicas, r)
+				}
+			}
+			partition.Replicas = newReplicas
+			ops = append(ops, clientv3.OpPut(partitionKey, partition.ToJson()))
+		}
+
+		txnResp, err := c.etcdClient.Txn(context.Background()).
+			If(clientv3.Compare(
+				clientv3.ModRevision(partitionKey),
+				"=",
+				resp.Kvs[0].ModRevision,
+			)).
+			Then(ops...).
+			Commit()
+
+		if err != nil {
+			return fmt.Errorf("transaction failed: %w", err)
+		}
+
+		if txnResp.Succeeded {
+			log.Printf("Failover completed for partition %d", partitionID)
+			return nil
+		}
+
+		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+	}
+
+	return fmt.Errorf("max retries reached for partition %d", partitionID)
+}
+
+func (c *Controller) notifyNewLeader(nodeID, partitionID int) {
+	resp, err := c.etcdClient.Get(context.Background(),
+		fmt.Sprintf("nodes/%d", nodeID))
+	if err != nil || len(resp.Kvs) == 0 {
+		log.Printf("Failed to get node %d info: %v", nodeID, err)
+		return
+	}
+
+	var node NodeMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
+		log.Printf("Invalid node data: %v", err)
+		return
+	}
+
+	url := fmt.Sprintf("%s/set-leader/%d", node.HttpAddress, partitionID)
+	httpResp, err := c.doNodeRequest("POST", url)
+	if err != nil {
+		log.Printf("Failed to notify new leader: %v", err)
+		return
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		log.Printf("New leader returned status: %s", httpResp.Status)
 	}
 }
 
