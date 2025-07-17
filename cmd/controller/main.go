@@ -10,6 +10,10 @@ func main() {
 	if err != nil {
 		panic("Failed to create Docker client")
 	}
-	controller := controller.NewController(dockerClient, 3, 2, "ct_hw4a_temp", "ct_hw4a-node:latest")
+
+	// TODO: read etcd endpoints from env file or sth
+	etcdEndpoints := []string{"http://etcd-1:2379", "http://etcd-2:2379", "http://etcd-3:2379"}
+
+	controller := controller.NewController(dockerClient, 3, 2, "ct_hw4a_temp", "ct_hw4a-node:latest", etcdEndpoints)
 	controller.Start(":8080")
 }
