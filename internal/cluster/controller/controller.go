@@ -17,9 +17,11 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/gin-gonic/gin"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 type Controller struct {
+	id                int
 	dockerClient      *docker.DockerClient
 	ginEngine         *gin.Engine
 	mu                sync.RWMutex
@@ -30,13 +32,14 @@ type Controller struct {
 	partitions []*PartitionMetadata
 
 	etcdClient *clientv3.Client
+	election   *concurrency.Election
 
 	httpClient  *http.Client
 	networkName string
 	nodeImage   string
 }
 
-func NewController(dockerClient *docker.DockerClient, partitionCount, replicationFactor int, networkName, nodeImage string, endpoints []string) *Controller {
+func NewController(id int, dockerClient *docker.DockerClient, partitionCount, replicationFactor int, networkName, nodeImage string, endpoints []string) *Controller {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -46,10 +49,17 @@ func NewController(dockerClient *docker.DockerClient, partitionCount, replicatio
 		DialTimeout: 5 * time.Second,
 	})
 	if err != nil {
-		log.Printf("[node.NewNode] Failed to create etcd client: %v", err)
+		log.Fatalf("[node.NewNode] Failed to create etcd client: %v", err)
 	}
 
+	session, err := concurrency.NewSession(cli, concurrency.WithTTL(5))
+	if err != nil {
+		log.Fatalf("controller::Start: failed to create etcd session, %v", err)
+	}
+	election := concurrency.NewElection(session, "controller/leader")
+
 	c := &Controller{
+		id:                id,
 		dockerClient:      dockerClient,
 		ginEngine:         router,
 		partitionCount:    partitionCount,
@@ -65,6 +75,7 @@ func NewController(dockerClient *docker.DockerClient, partitionCount, replicatio
 			},
 		},
 		etcdClient:  cli,
+		election:    election,
 		networkName: networkName,
 		nodeImage:   nodeImage,
 	}
@@ -186,7 +197,6 @@ func (c *Controller) Start(addr string) {
 
 	<-ctx.Done()
 	log.Printf("controller::Start: Shutting down gracefully...")
-	// TODO: shutting down node containers
 }
 
 func (c *Controller) makeNodeReady(nodeID int) {
