@@ -353,37 +353,100 @@ func (c *Controller) makeNodeReady(nodeID int) {
 
 func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 	for _, partitionID := range partitionsToAssign {
-		partition := c.partitions[partitionID]
 		for i := 0; i < 3; i++ {
-			err := c.replicate(partitionID, nodeID)
-			if err == nil {
-				c.mu.Lock()
-				if partition.Leader == -1 {
-					partition.Leader = nodeID
-				} else {
-					partition.Replicas = append(partition.Replicas, nodeID)
-				}
-				c.nodes[nodeID].partitions = append(c.nodes[nodeID].partitions, partitionID)
-				c.mu.Unlock()
-				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d\n", partitionID, nodeID)
-				break
-			} else {
-				log.Printf("controller::makeNodeReady: Failed to replicate %d in node %d: %v\n", partitionID, nodeID, err)
+			resp, err := c.etcdClient.Get(context.Background(),
+				fmt.Sprintf("partitions/%d", partitionID))
+			if err != nil {
+				log.Printf("Failed to get partition %d: %v", partitionID, err)
+				continue
 			}
-			time.Sleep(1 * time.Second)
+
+			var partition PartitionMetadata
+			if len(resp.Kvs) > 0 {
+				if err := json.Unmarshal(resp.Kvs[0].Value, &partition); err != nil {
+					log.Printf("Bad partition data for %d: %v", partitionID, err)
+					continue
+				}
+			} else {
+				partition = PartitionMetadata{
+					PartitionID: partitionID,
+					Leader:      -1,
+					Replicas:    []int{},
+				}
+			}
+
+			if err := c.replicate(partition, nodeID); err != nil {
+				log.Printf("Replication attempt %d failed for partition %d: %v",
+					i+1, partitionID, err)
+				time.Sleep(time.Second * time.Duration(i+1))
+				continue
+			}
+
+			txnResp, err := c.etcdClient.Txn(context.Background()).
+				If(clientv3.Compare(
+					clientv3.ModRevision(fmt.Sprintf("partitions/%d", partitionID)),
+					"=",
+					resp.Kvs[0].ModRevision,
+				)).
+				Then(
+					clientv3.OpPut(
+						fmt.Sprintf("partitions/%d", partitionID),
+						c.updatePartitionData(partition, nodeID),
+					),
+					// Update node's partition list
+					clientv3.OpPut(
+						fmt.Sprintf("nodes/%d/partitions", nodeID),
+						c.updateNodePartitions(nodeID, partitionID),
+					),
+				).
+				Commit()
+
+			if err != nil {
+				log.Printf("Transaction failed for partition %d: %v", partitionID, err)
+				continue
+			}
+
+			if !txnResp.Succeeded {
+				log.Printf("Partition %d modified by another controller, retrying", partitionID)
+				continue
+			}
+
+			log.Printf("Successfully assigned partition %d to node %d", partitionID, nodeID)
+			break // Move to next partition
 		}
 	}
 }
 
-func (c *Controller) replicate(partitionID, nodeID int) error {
-	var addr string
-	c.mu.RLock()
-	if c.partitions[partitionID].Leader == -1 {
-		addr = fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
+func (c *Controller) updatePartitionData(p PartitionMetadata, nodeID int) string {
+	if p.Leader == -1 {
+		p.Leader = nodeID
 	} else {
-		addr = fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[c.partitions[partitionID].Leader].HttpAddress, partitionID, c.nodes[nodeID].TcpAddress)
+		p.Replicas = append(p.Replicas, nodeID)
 	}
-	c.mu.RUnlock()
+	data, _ := json.Marshal(p)
+	return string(data)
+}
+
+func (c *Controller) updateNodePartitions(nodeID, partitionID int) string {
+	resp, _ := c.etcdClient.Get(context.Background(),
+		fmt.Sprintf("nodes/%d/partitions", nodeID))
+
+	var partitions []int
+	if len(resp.Kvs) > 0 {
+		json.Unmarshal(resp.Kvs[0].Value, &partitions)
+	}
+	partitions = append(partitions, partitionID)
+	data, _ := json.Marshal(partitions)
+	return string(data)
+}
+
+func (c *Controller) replicate(partition PartitionMetadata, nodeID int) error {
+	var addr string
+	if partition.Leader == -1 {
+		addr = fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partition.PartitionID)
+	} else {
+		addr = fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[partition.Leader].HttpAddress, partition.PartitionID, c.nodes[nodeID].TcpAddress)
+	}
 
 	resp, err := c.doNodeRequest("POST", addr)
 	if err != nil {
