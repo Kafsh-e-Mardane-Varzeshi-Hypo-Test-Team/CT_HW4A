@@ -164,6 +164,12 @@ func (c *Controller) Start(addr string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	err := c.election.Campaign(context.Background(), fmt.Sprintf("controller-%d", c.id))
+	if err != nil {
+		log.Fatalf("controller::Start: failed to campaign for leader election, %v", err)
+	}
+	log.Printf("I'm the leader, controller-%d", c.id)
+
 	go c.monitorHeartbeat()
 	go func() {
 		ch := c.etcdClient.Watch(context.Background(), "nodes/active/", clientv3.WithPrefix())
