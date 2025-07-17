@@ -152,6 +152,8 @@ func (c *Controller) Start(addr string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	go c.monitorHeartbeat()
+
 	go func() {
 		if err := c.ginEngine.Run(addr); err != nil {
 			log.Fatalf("controller::Start: Failed to run http server %v", err)
