@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -95,6 +96,37 @@ func NewController(id int, dockerClient *docker.DockerClient, partitionCount, re
 }
 
 func (c *Controller) RegisterNode(nodeID int) error {
+	nodeMetadata := &NodeMetadata{
+		ID:     nodeID,
+		Status: Creating,
+	}
+
+	nodeJSON, err := json.Marshal(nodeMetadata)
+	if err != nil {
+		log.Printf("controller::RegisterNode: Failed to marshal node metadata: %v\n", err)
+		return errors.New("failed to marshal node metadata")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	key := fmt.Sprintf("nodes/%d", nodeID)
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+		clientv3.Compare(clientv3.Version(key), "=", 0),
+	).Then(
+		clientv3.OpPut(key, string(nodeJSON)),
+	).Commit()
+
+	if err != nil {
+		return fmt.Errorf("etcd transaction failed: %w", err)
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::RegisterNode: Not leader or Node %d already exists.\n", nodeID)
+		return errors.New("not leader or node already exists")
+	}
+
 	c.mu.Lock()
 	if _, exists := c.nodes[nodeID]; exists {
 		c.mu.Unlock()
@@ -113,7 +145,7 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	tcpPort := "9000"
 	httpPort := "8000"
 
-	err := c.dockerClient.CreateNodeContainer(
+	err = c.dockerClient.CreateNodeContainer(
 		imageName,
 		nodeID,
 		networkName,
