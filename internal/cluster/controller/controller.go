@@ -188,20 +188,6 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		return errors.New("not leader or node already exists")
 	}
 
-	//===================================================
-	c.mu.Lock()
-	if _, exists := c.nodes[nodeID]; exists {
-		c.mu.Unlock()
-		log.Printf("controller::RegisterNode: Node %d already exists.\n", nodeID)
-		return errors.New("node already exists")
-	}
-	c.nodes[nodeID] = &NodeMetadata{
-		ID:     nodeID,
-		Status: Creating,
-	}
-	c.mu.Unlock()
-	//====================================================
-
 	// Create a new docker container for the node
 	imageName := c.nodeImage
 	networkName := c.networkName
@@ -244,14 +230,6 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		log.Printf("controller::RegisterNode: Not leader")
 		return errors.New("not leader")
 	}
-	//====================================================
-	c.mu.Lock()
-	node := c.nodes[nodeID]
-	node.TcpAddress = fmt.Sprintf("node-%d:%s", nodeID, tcpPort)
-	node.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
-	node.Status = Syncing
-	c.mu.Unlock()
-	//====================================================
 
 	go c.makeNodeReady(nodeID)
 
