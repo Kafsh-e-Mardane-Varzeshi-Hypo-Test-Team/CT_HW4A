@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -154,11 +155,19 @@ func (c *Controller) Start(addr string) {
 
 	go c.monitorHeartbeat()
 	go func() {
-		ch := c.etcdClient.Watch(context.Background(), "nodes/", clientv3.WithPrefix())
+		ch := c.etcdClient.Watch(context.Background(), "nodes/active/", clientv3.WithPrefix())
 		for resp := range ch {
 			for _, event := range resp.Events {
-				log.Printf("controller::Start: node status modified: %v, %v", event.Type, event.Kv.Key)
-				// TODO: implement type DELETE and PUT
+				log.Printf("controller::Start: node status modified: %v", event)
+				if event.Type == clientv3.EventTypeDelete {
+					nodeId, err := strconv.Atoi(string(event.Kv.Key)[len("nodes/active/"):])
+					if err != nil {
+						log.Printf("controller::Start: Failed to parse node ID from etcd key: %v", err)
+						continue
+					}
+					log.Printf("controller::Start: Node %d removed from etcd\n", nodeId)
+					// go c.handleFailover(nodeId)
+				}
 			}
 		}
 	}()

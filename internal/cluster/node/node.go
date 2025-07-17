@@ -74,7 +74,7 @@ func (n *Node) Start() {
 	log.Println("[node.Start] etcd session created successfully!")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	n.etcdClient.Put(ctx, fmt.Sprintf("nodes/node-%d", n.Id), "baghojenanash", clientv3.WithLease(session.Lease()))
+	n.etcdClient.Put(ctx, fmt.Sprintf("nodes/active/%d", n.Id), "baghojenanash", clientv3.WithLease(session.Lease()))
 	defer cancel()
 
 	go n.startHeartbeat(time.Duration(HEARTBEAT_TIMER * time.Second))
