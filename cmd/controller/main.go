@@ -1,6 +1,10 @@
 package main
 
 import (
+	"log"
+	"os"
+	"strconv"
+
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/controller/docker"
 )
@@ -14,7 +18,10 @@ func main() {
 	// TODO: read etcd endpoints from env file or sth
 	etcdEndpoints := []string{"http://etcd-1:2379", "http://etcd-2:2379", "http://etcd-3:2379"}
 
-	// TODO: get controller ID from environment variable or config
-	controller := controller.NewController(1, dockerClient, 3, 2, "ct_hw4a_temp", "ct_hw4a-node:latest", etcdEndpoints)
+	id, err := strconv.Atoi(os.Getenv("CONTROLLER-ID"))
+	if err != nil {
+		log.Fatalf("controller::main: failed to get 'CONTROLLER-ID' env variable: %v", err)
+	}
+	controller := controller.NewController(id, dockerClient, 3, 2, "ct_hw4a_temp", "ct_hw4a-node:latest", etcdEndpoints)
 	controller.Start(":8080")
 }

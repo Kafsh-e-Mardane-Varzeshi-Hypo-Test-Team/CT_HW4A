@@ -63,7 +63,7 @@ services:
       - temp
 
   controller:
-    container_name: controller
+    container_name: controller-1
     build:
       context: .
       dockerfile: ./cmd/controller/Dockerfile
@@ -73,6 +73,7 @@ services:
       - temp
     environment:
       - DOCKER_NETWORK=temp
+      - CONTROLLER-ID=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
