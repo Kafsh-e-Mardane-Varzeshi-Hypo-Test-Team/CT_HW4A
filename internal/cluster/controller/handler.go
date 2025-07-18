@@ -89,7 +89,7 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 		return
 	}
 
-	partitionKey := fmt.Sprintf("partition-%d", req.PartitionID)
+	partitionKey := fmt.Sprintf("partition/%d", req.PartitionID)
 
 	// Get partition from etcd
 	resp, err := c.etcdClient.Get(ctx, partitionKey)
@@ -153,7 +153,7 @@ func (c *Controller) handleMoveReplica(ctx *gin.Context) {
 		return
 	}
 
-	partitionKey := fmt.Sprintf("partition-%d", req.PartitionID)
+	partitionKey := fmt.Sprintf("partition/%d", req.PartitionID)
 
 	resp, err := c.etcdClient.Get(ctx, partitionKey)
 	if err != nil {
