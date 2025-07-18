@@ -231,7 +231,7 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		return errors.New("not leader")
 	}
 
-	go c.makeNodeReady(nodeID)
+	go c.makeNodeReady(nodeMetadata)
 
 	return nil
 }
@@ -324,7 +324,7 @@ func (c *Controller) Start(addr string) {
 	log.Printf("controller::Start: Shutting down gracefully...")
 }
 
-func (c *Controller) makeNodeReady(nodeID int) {
+func (c *Controller) makeNodeReady(node *NodeMetadata) {
 	partitionsToAssign := make([]int, 0)
 	resp, err := c.etcdClient.Get(context.Background(), "partitions/", clientv3.WithPrefix())
 	if err != nil {
@@ -343,12 +343,26 @@ func (c *Controller) makeNodeReady(nodeID int) {
 		}
 	}
 
-	c.replicatePartitions(partitionsToAssign, nodeID)
+	c.replicatePartitions(partitionsToAssign, node.ID)
 
-	c.mu.Lock()
-	c.nodes[nodeID].Status = Alive
-	c.mu.Unlock()
-	log.Printf("controller::makeNodeReady: Node %d is now ready\n", nodeID)
+	node.Status = Alive
+	finalMeta, err := json.Marshal(node)
+	if err != nil {
+		log.Printf("failed to marshal final metadata: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	nodeKey := fmt.Sprintf("nodes/%d", node.ID)
+
+	_, err = c.etcdClient.Put(ctx, nodeKey, string(finalMeta))
+	if err != nil {
+		log.Printf("failed to mark node as alive: %v", err)
+		return
+	}
+	log.Printf("controller::makeNodeReady: Node %d is now ready\n", node.ID)
 }
 
 func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
