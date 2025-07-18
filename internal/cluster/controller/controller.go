@@ -494,7 +494,7 @@ func (c *Controller) monitorHeartbeat() {
 func (c *Controller) handleFailover(nodeID int) {
 	log.Printf("Starting failover for node %d", nodeID)
 
-	nodeKey := fmt.Sprintf("/nodes/%d", nodeID)
+	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
 	resp, err := c.etcdClient.Get(context.Background(), nodeKey)
 	if err != nil {
 		log.Printf("failed to check node status: %v", err)
@@ -619,30 +619,88 @@ func (c *Controller) notifyNewLeader(nodeID, partitionID int) {
 }
 
 func (c *Controller) reviveNode(nodeID int) {
-	c.mu.Lock()
-	node, exists := c.nodes[nodeID]
-	if !exists || node.Status != Dead {
-		c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
+	partitionsKey := fmt.Sprintf("nodes/%d/partitions", nodeID)
+
+	getResp, err := c.etcdClient.Get(ctx, nodeKey)
+	if err != nil {
+		log.Printf("failed to get node metadata: %v", err)
 		return
 	}
-	node.Status = Syncing
-	c.mu.Unlock()
+
+	if len(getResp.Kvs) == 0 {
+		log.Printf("node %d not found", nodeID)
+		return
+	}
+
+	var node NodeMetadata
+	if err := json.Unmarshal(getResp.Kvs[0].Value, &node); err != nil {
+		log.Printf("failed to unmarshal node metadata: %v", err)
+		return
+	}
+
+	if node.Status != Dead {
+		return
+	}
 
 	log.Printf("controller::reviveNode: Reviving node %d\n", nodeID)
 
-	partitionsToReplicate := make([]int, 0)
-	c.mu.Lock()
-	for _, partition := range node.partitions {
-		partitionsToReplicate = append(partitionsToReplicate, partition)
+	getPartsResp, err := c.etcdClient.Get(ctx, partitionsKey)
+	if err != nil {
+		log.Printf("failed to get partitions: %v", err)
+		return
 	}
-	node.partitions = make([]int, 0)
-	c.mu.Unlock()
+
+	var partitionsToReplicate []int
+	if len(getPartsResp.Kvs) > 0 {
+		if err := json.Unmarshal(getPartsResp.Kvs[0].Value, &partitionsToReplicate); err != nil {
+			log.Printf("failed to unmarshal partitions: %v", err)
+			return
+		}
+	}
+
+	node.Status = Syncing
+	updatedMeta, err := json.Marshal(node)
+	if err != nil {
+		log.Printf("failed to marshal updated metadata: %v", err)
+		return
+	}
+
+	txnResp, err := c.etcdClient.Txn(ctx).
+		If(clientv3.Compare(clientv3.Version(nodeKey), ">", 0)).
+		Then(
+			clientv3.OpPut(nodeKey, string(updatedMeta)),
+		).
+		Commit()
+
+	if err != nil {
+		log.Printf("failed to update node status: %v", err)
+		return
+	}
+	if !txnResp.Succeeded {
+		log.Printf("node metadata changed during revival")
+		return
+	}
+
 	c.replicatePartitions(partitionsToReplicate, nodeID)
 
-	c.mu.Lock()
-	c.nodes[nodeID].Status = Alive
-	c.mu.Unlock()
-	log.Printf("controller::reviveNode: Node %d revived successfully\n", nodeID)
+	node.Status = Alive
+	finalMeta, err := json.Marshal(node)
+	if err != nil {
+		log.Printf("failed to marshal final metadata: %v", err)
+		return
+	}
+
+	_, err = c.etcdClient.Put(ctx, nodeKey, string(finalMeta))
+	if err != nil {
+		log.Printf("failed to mark node as alive: %v", err)
+		return
+	}
+
+	log.Printf("controller::reviveNode: Node %d revived successfully", nodeID)
 }
 
 func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
