@@ -796,33 +796,74 @@ func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 }
 
 func (c *Controller) removePartitionReplica(partitionID, nodeID int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	partition := c.partitions[partitionID]
-	if partition == nil {
-		return fmt.Errorf("partition %d not found", partitionID)
-	}
+    partitionKey := fmt.Sprintf("partitions/%d", partitionID)
 
-	for i, replica := range partition.Replicas {
-		if replica == nodeID {
-			partition.Replicas = append(partition.Replicas[:i], partition.Replicas[i+1:]...)
-			log.Printf("controller::removePartitionReplica: Removed node %d from replicas of partition %d\n", nodeID, partitionID)
-			return nil
-		}
-	}
+    getResp, err := c.etcdClient.Get(ctx, partitionKey)
+    if err != nil {
+        return fmt.Errorf("failed to get partition metadata: %v", err)
+    }
+    if len(getResp.Kvs) == 0 {
+        return fmt.Errorf("partition %d not found", partitionID)
+    }
 
-	addr := fmt.Sprintf("%s/delete-partition/%d", c.nodes[nodeID].HttpAddress, partitionID)
+    var partition PartitionMetadata
+    if err := json.Unmarshal(getResp.Kvs[0].Value, &partition); err != nil {
+        return fmt.Errorf("failed to unmarshal partition metadata: %v", err)
+    }
 
-	resp, err := c.doNodeRequest("POST", addr)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return errors.New("resp status not OK: " + resp.Status)
-	}
+    replicasUpdated := false
+    newReplicas := make([]int, 0, len(partition.Replicas))
+    for _, replica := range partition.Replicas {
+        if replica != nodeID {
+            newReplicas = append(newReplicas, replica)
+        } else {
+            replicasUpdated = true
+        }
+    }
 
-	log.Printf("controller::removePartitionReplica: Node %d removed from partition %d successfully\n", nodeID, partitionID)
-	return nil
+    if replicasUpdated {
+        partition.Replicas = newReplicas
+        updatedPartition, err := json.Marshal(partition)
+        if err != nil {
+            return fmt.Errorf("failed to marshal updated partition metadata: %v", err)
+        }
+
+        _, err = c.etcdClient.Put(ctx, partitionKey, string(updatedPartition))
+        if err != nil {
+            return fmt.Errorf("failed to update partition metadata: %v", err)
+        }
+
+        log.Printf("controller::removePartitionReplica: Removed node %d from replicas of partition %d\n", nodeID, partitionID)
+        return nil
+    }
+
+    nodeKey := fmt.Sprintf("nodes/%d", nodeID)
+    nodeResp, err := c.etcdClient.Get(ctx, nodeKey)
+    if err != nil {
+        return fmt.Errorf("failed to get node metadata: %v", err)
+    }
+    if len(nodeResp.Kvs) == 0 {
+        return fmt.Errorf("node %d not found", nodeID)
+    }
+
+    var node NodeMetadata
+    if err := json.Unmarshal(nodeResp.Kvs[0].Value, &node); err != nil {
+        return fmt.Errorf("failed to unmarshal node metadata: %v", err)
+    }
+
+    addr := fmt.Sprintf("%s/delete-partition/%d", node.HttpAddress, partitionID)
+    resp, err := c.doNodeRequest("POST", addr)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return errors.New("resp status not OK: " + resp.Status)
+    }
+
+    log.Printf("controller::removePartitionReplica: Node %d removed from partition %d successfully\n", nodeID, partitionID)
+    return nil
 }
