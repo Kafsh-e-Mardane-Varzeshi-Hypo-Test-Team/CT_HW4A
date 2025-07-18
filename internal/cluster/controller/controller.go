@@ -322,9 +322,23 @@ func (c *Controller) Start(addr string) {
 							return
 						}
 
-						_, err = c.etcdClient.Put(context.Background(), nodeKey, string(updatedNode))
+						// Use transaction to ensure leadership and atomic update
+						txnResp, err := c.etcdClient.Txn(context.Background()).
+							If(
+								clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+							).
+							Then(
+								clientv3.OpPut(nodeKey, string(updatedNode)),
+							).
+							Commit()
+
 						if err != nil {
 							log.Printf("controller::monitorHeartbeat: Failed to update node %d status in etcd: %v\n", node.ID, err)
+							return
+						}
+
+						if !txnResp.Succeeded {
+							log.Printf("controller::monitorHeartbeat: Not leader, cannot mark node %d as dead", node.ID)
 							return
 						}
 
@@ -403,11 +417,23 @@ func (c *Controller) makeNodeReady(node *NodeMetadata) {
 
 	nodeKey := fmt.Sprintf("nodes/%d", node.ID)
 
-	_, err = c.etcdClient.Put(ctx, nodeKey, string(finalMeta))
+	// Use transaction to ensure leadership and atomic update
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpPut(nodeKey, string(finalMeta)),
+	).Commit()
+
 	if err != nil {
 		log.Printf("failed to mark node as alive: %v", err)
 		return
 	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::makeNodeReady: Not leader, cannot mark node %d as alive", node.ID)
+		return
+	}
+
 	log.Printf("controller::makeNodeReady: Node %d is now ready\n", node.ID)
 }
 
@@ -445,11 +471,14 @@ func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 			}
 
 			txnResp, err := c.etcdClient.Txn(context.Background()).
-				If(clientv3.Compare(
-					clientv3.ModRevision(fmt.Sprintf("partitions/%d", partitionID)),
-					"=",
-					resp.Kvs[0].ModRevision,
-				)).
+				If(
+					clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+					clientv3.Compare(
+						clientv3.ModRevision(fmt.Sprintf("partitions/%d", partitionID)),
+						"=",
+						resp.Kvs[0].ModRevision,
+					),
+				).
 				Then(
 					clientv3.OpPut(
 						fmt.Sprintf("partitions/%d", partitionID),
@@ -469,7 +498,7 @@ func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 			}
 
 			if !txnResp.Succeeded {
-				log.Printf("Partition %d modified by another controller, retrying", partitionID)
+				log.Printf("Partition %d modified by another controller or not leader, retrying", partitionID)
 				continue
 			}
 
@@ -563,8 +592,26 @@ func (c *Controller) doNodeRequest(method, addr string) (*http.Response, error) 
 func (c *Controller) handleFailover(nodeID int) {
 	log.Printf("Starting failover for node %d", nodeID)
 
+	// Verify leadership before handling failover
+	ctx := context.Background()
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpGet("dummy_key"),
+	).Commit()
+
+	if err != nil {
+		log.Printf("controller::handleFailover: Leadership verification failed: %v", err)
+		return
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::handleFailover: Not leader, ignoring failover for node %d", nodeID)
+		return
+	}
+
 	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
-	resp, err := c.etcdClient.Get(context.Background(), nodeKey)
+	resp, err := c.etcdClient.Get(ctx, nodeKey)
 	if err != nil {
 		log.Printf("failed to check node status: %v", err)
 		return
@@ -586,7 +633,7 @@ func (c *Controller) handleFailover(nodeID int) {
 	}
 
 	partitionsKey := fmt.Sprintf("nodes/%d/partitions", nodeID)
-	resp, err = c.etcdClient.Get(context.Background(), partitionsKey)
+	resp, err = c.etcdClient.Get(ctx, partitionsKey)
 	if err != nil {
 		log.Printf("failed to get node partitions: %v", err)
 		return
@@ -652,11 +699,14 @@ func (c *Controller) handlePartitionFailover(partitionID, deadNodeID int) error 
 		}
 
 		txnResp, err := c.etcdClient.Txn(context.Background()).
-			If(clientv3.Compare(
-				clientv3.ModRevision(partitionKey),
-				"=",
-				resp.Kvs[0].ModRevision,
-			)).
+			If(
+				clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+				clientv3.Compare(
+					clientv3.ModRevision(partitionKey),
+					"=",
+					resp.Kvs[0].ModRevision,
+				),
+			).
 			Then(ops...).
 			Commit()
 
@@ -706,6 +756,22 @@ func (c *Controller) reviveNode(nodeID int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpGet("dummy_key"),
+	).Commit()
+
+	if err != nil {
+		log.Printf("controller::reviveNode: Leadership verification failed: %v", err)
+		return
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::reviveNode: Not leader, cannot revive node %d", nodeID)
+		return
+	}
+
 	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
 	partitionsKey := fmt.Sprintf("nodes/%d/partitions", nodeID)
 
@@ -753,8 +819,11 @@ func (c *Controller) reviveNode(nodeID int) {
 		return
 	}
 
-	txnResp, err := c.etcdClient.Txn(ctx).
-		If(clientv3.Compare(clientv3.Version(nodeKey), ">", 0)).
+	txnResp, err = c.etcdClient.Txn(ctx).
+		If(
+			clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+			clientv3.Compare(clientv3.Version(nodeKey), ">", 0),
+		).
 		Then(
 			clientv3.OpPut(nodeKey, string(updatedMeta)),
 		).
@@ -765,7 +834,7 @@ func (c *Controller) reviveNode(nodeID int) {
 		return
 	}
 	if !txnResp.Succeeded {
-		log.Printf("node metadata changed during revival")
+		log.Printf("controller::reviveNode: Not leader or node metadata changed during revival")
 		return
 	}
 
@@ -778,9 +847,23 @@ func (c *Controller) reviveNode(nodeID int) {
 		return
 	}
 
-	_, err = c.etcdClient.Put(ctx, nodeKey, string(finalMeta))
+	// Use transaction to ensure leadership and atomic update
+	txnResp, err = c.etcdClient.Txn(ctx).
+		If(
+			clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+		).
+		Then(
+			clientv3.OpPut(nodeKey, string(finalMeta)),
+		).
+		Commit()
+
 	if err != nil {
 		log.Printf("failed to mark node as alive: %v", err)
+		return
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::reviveNode: Not leader, cannot mark node %d as alive", nodeID)
 		return
 	}
 
@@ -790,6 +873,20 @@ func (c *Controller) reviveNode(nodeID int) {
 func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpGet("dummy_key"),
+	).Commit()
+
+	if err != nil {
+		return fmt.Errorf("leadership verification failed: %v", err)
+	}
+
+	if !txnResp.Succeeded {
+		return fmt.Errorf("not leader, cannot change leader for partition %d", partitionID)
+	}
 
 	partitionKey := fmt.Sprintf("partitions/%d", partitionID)
 
@@ -856,9 +953,26 @@ func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 		return fmt.Errorf("failed to marshal updated partition metadata: %v", err)
 	}
 
-	_, err = c.etcdClient.Put(ctx, partitionKey, string(updatedPartition))
+	txnResp, err = c.etcdClient.Txn(ctx).
+		If(
+			clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+			clientv3.Compare(
+				clientv3.ModRevision(partitionKey),
+				"=",
+				getResp.Kvs[0].ModRevision,
+			),
+		).
+		Then(
+			clientv3.OpPut(partitionKey, string(updatedPartition)),
+		).
+		Commit()
+
 	if err != nil {
 		return fmt.Errorf("failed to update partition metadata: %v", err)
+	}
+
+	if !txnResp.Succeeded {
+		return fmt.Errorf("not leader or partition %d was modified concurrently", partitionID)
 	}
 
 	log.Printf("controller::changeLeader: Partition %d leader changed to node %d\n", partitionID, newLeaderID)
@@ -868,6 +982,20 @@ func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 func (c *Controller) removePartitionReplica(partitionID, nodeID int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpGet("dummy_key"),
+	).Commit()
+
+	if err != nil {
+		return fmt.Errorf("leadership verification failed: %v", err)
+	}
+
+	if !txnResp.Succeeded {
+		return fmt.Errorf("not leader, cannot remove partition replica")
+	}
 
 	partitionKey := fmt.Sprintf("partitions/%d", partitionID)
 
@@ -901,9 +1029,26 @@ func (c *Controller) removePartitionReplica(partitionID, nodeID int) error {
 			return fmt.Errorf("failed to marshal updated partition metadata: %v", err)
 		}
 
-		_, err = c.etcdClient.Put(ctx, partitionKey, string(updatedPartition))
+		txnResp, err = c.etcdClient.Txn(ctx).
+			If(
+				clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+				clientv3.Compare(
+					clientv3.ModRevision(partitionKey),
+					"=",
+					getResp.Kvs[0].ModRevision,
+				),
+			).
+			Then(
+				clientv3.OpPut(partitionKey, string(updatedPartition)),
+			).
+			Commit()
+
 		if err != nil {
 			return fmt.Errorf("failed to update partition metadata: %v", err)
+		}
+
+		if !txnResp.Succeeded {
+			return fmt.Errorf("not leader or partition %d was modified concurrently", partitionID)
 		}
 
 		log.Printf("controller::removePartitionReplica: Removed node %d from replicas of partition %d\n", nodeID, partitionID)
