@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
@@ -25,11 +24,8 @@ type Controller struct {
 	id                int
 	dockerClient      *docker.DockerClient
 	ginEngine         *gin.Engine
-	mu                sync.RWMutex
 	partitionCount    int
 	replicationFactor int
-
-	nodes map[int]*NodeMetadata
 
 	etcdClient *clientv3.Client
 	election   *concurrency.Election
@@ -138,8 +134,6 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 		partitionCount:    partitionCount,
 		replicationFactor: replicationFactor,
 
-		nodes: make(map[int]*NodeMetadata),
-
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: &http.Transport{
@@ -240,18 +234,36 @@ func (c *Controller) RegisterNode(nodeID int) error {
 }
 
 func (c *Controller) removeNode(nodeID int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	ctx := context.Background()
 
-	_, exists := c.nodes[nodeID]
-	if !exists {
+	key := fmt.Sprintf("nodes/%d", nodeID)
+	resp, err := c.etcdClient.Get(ctx, key)
+	if err != nil || len(resp.Kvs) == 0 {
 		return errors.New("node not found")
 	}
 
-	delete(c.nodes, nodeID)
+	var node NodeMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
+		log.Printf("Invalid node data: %v", err)
+		return errors.New("failed to unmarshal node data")
+	}
 
-	// Stop and remove the docker container
-	err := c.dockerClient.RemoveNodeContainer(nodeID)
+	txnResp, err := c.etcdClient.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+	).Then(
+		clientv3.OpDelete(key),
+	).Commit()
+
+	if err != nil {
+		return fmt.Errorf("etcd transaction failed: %w", err)
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::removeNode: Not leader")
+		return errors.New("not leader")
+	}
+
+	err = c.dockerClient.RemoveNodeContainer(nodeID)
 	if err != nil {
 		log.Printf("controller::removeNode: Failed to remove docker container for node %d: %v\n", nodeID, err)
 		return err
@@ -493,20 +505,44 @@ func (c *Controller) updateNodePartitions(nodeID, partitionID int) string {
 func (c *Controller) replicate(partition PartitionMetadata, nodeID int) error {
 	log.Printf("partition %d leader: %d, replicas: %v", partition.PartitionID, partition.Leader, partition.Replicas)
 
-	var addr string
-	if partition.Leader == -1 {
-		addr = fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partition.PartitionID)
-	} else {
-		addr = fmt.Sprintf("%s/send-partition/%d/%s", c.nodes[partition.Leader].HttpAddress, partition.PartitionID, c.nodes[nodeID].TcpAddress)
+	// Get node metadata from etcd
+	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
+	nodeResp, err := c.etcdClient.Get(context.Background(), nodeKey)
+	if err != nil || len(nodeResp.Kvs) == 0 {
+		return fmt.Errorf("failed to get node %d metadata: %w", nodeID, err)
 	}
 
-	resp, err := c.doNodeRequest("POST", addr)
+	var node NodeMetadata
+	if err := json.Unmarshal(nodeResp.Kvs[0].Value, &node); err != nil {
+		return fmt.Errorf("failed to unmarshal node %d metadata: %w", nodeID, err)
+	}
+
+	var addr string
+	if partition.Leader == -1 {
+		addr = fmt.Sprintf("%s/add-partition/%d", node.HttpAddress, partition.PartitionID)
+	} else {
+		// Get leader node metadata from etcd
+		leaderKey := fmt.Sprintf("nodes/%d", partition.Leader)
+		leaderResp, err := c.etcdClient.Get(context.Background(), leaderKey)
+		if err != nil || len(leaderResp.Kvs) == 0 {
+			return fmt.Errorf("failed to get leader node %d metadata: %w", partition.Leader, err)
+		}
+
+		var leaderNode NodeMetadata
+		if err := json.Unmarshal(leaderResp.Kvs[0].Value, &leaderNode); err != nil {
+			return fmt.Errorf("failed to unmarshal leader node %d metadata: %w", partition.Leader, err)
+		}
+
+		addr = fmt.Sprintf("%s/send-partition/%d/%s", leaderNode.HttpAddress, partition.PartitionID, node.TcpAddress)
+	}
+
+	httpResp, err := c.doNodeRequest("POST", addr)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return errors.New("resp status not OK: " + resp.Status)
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode != http.StatusOK {
+		return errors.New("resp status not OK: " + httpResp.Status)
 	}
 
 	return nil
