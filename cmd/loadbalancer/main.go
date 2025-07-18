@@ -7,7 +7,14 @@ import (
 )
 
 func main() {
-	lb := loadbalancer.NewLoadBalancer("http://controller:8080")
+	// etcd endpoints - these should match your etcd cluster configuration
+	etcdEndpoints := []string{
+		"http://etcd-1:2379",
+		"http://etcd-2:2379",
+		"http://etcd-3:2379",
+	}
+
+	lb := loadbalancer.NewLoadBalancer(etcdEndpoints)
 
 	if err := lb.Run(":9001"); err != nil {
 		log.Fatalf("Failed to start load balancer: %v", err)

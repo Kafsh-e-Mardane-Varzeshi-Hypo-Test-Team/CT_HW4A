@@ -1,6 +1,8 @@
 package controller
 
-import "time"
+import (
+	"encoding/json"
+)
 
 type NodeStatus string
 
@@ -16,12 +18,20 @@ type NodeMetadata struct {
 	HttpAddress string     `json:"http"`
 	TcpAddress  string     `json:"tcp"`
 	Status      NodeStatus `json:"status"`
-	lastSeen    time.Time
-	partitions  []int
 }
 
 type PartitionMetadata struct {
 	PartitionID int   `json:"partitionId"`
 	Leader      int   `json:"leader"`
 	Replicas    []int `json:"replicas"`
+}
+
+func (n *NodeMetadata) ToJson() string {
+	data, _ := json.Marshal(n)
+	return string(data)
+}
+
+func (p *PartitionMetadata) ToJson() string {
+	data, _ := json.Marshal(p)
+	return string(data)
 }
