@@ -62,7 +62,7 @@ services:
     networks:
       - temp
 
-  controller:
+  controller-1:
     container_name: controller-1
     build:
       context: .
@@ -78,6 +78,61 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
     stdin_open: true
+    depends_on:
+      etcd-1:
+        condition: service_started
+      etcd-2:
+        condition: service_started
+      etcd-3:
+        condition: service_started
+
+  controller-2:
+    container_name: controller-2
+    build:
+      context: .
+      dockerfile: ./cmd/controller/Dockerfile
+    ports:
+      - "8081:8080"
+    networks:
+      - temp
+    environment:
+      - DOCKER_NETWORK=temp
+      - CONTROLLER-ID=2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    tty: true
+    stdin_open: true
+    depends_on:
+      etcd-1:
+        condition: service_started
+      etcd-2:
+        condition: service_started
+      etcd-3:
+        condition: service_started
+
+  controller-3:
+    container_name: controller-3
+    build:
+      context: .
+      dockerfile: ./cmd/controller/Dockerfile
+    ports:
+      - "8082:8080"
+    networks:
+      - temp
+    environment:
+      - DOCKER_NETWORK=temp
+      - CONTROLLER-ID=3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    tty: true
+    stdin_open: true
+    depends_on:
+      etcd-1:
+        condition: service_started
+      etcd-2:
+        condition: service_started
+      etcd-3:
+        condition: service_started
 
 
   loadbalancer:
@@ -90,7 +145,11 @@ services:
     networks:
       - temp
     depends_on:
-      controller:
+      etcd-1:
+        condition: service_started
+      etcd-2:
+        condition: service_started
+      etcd-3:
         condition: service_started
 
   node:
