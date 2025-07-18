@@ -1,82 +1,21 @@
 package controller
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 func (c *Controller) setupRoutes() {
-	c.ginEngine.GET("/metadata", c.handleGetMetadata)
-	c.ginEngine.GET("/node-metadata/:partitionID", c.handleGetNodeMetadata)
-
-	c.ginEngine.POST("/node-heartbeat", c.handleHeartbeat)
-
 	c.ginEngine.POST("/node/add", c.handleRegisterNode)
 	c.ginEngine.POST("/node/remove", c.handleRemoveNode)
 
 	c.ginEngine.POST("/partition/move-replica", c.handleMoveReplica)
 	c.ginEngine.POST("/partition/set-leader", c.handleSetLeader)
-}
-
-func (c *Controller) handleGetMetadata(ctx *gin.Context) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	metadata := struct {
-		NodeAddresses map[int]string       `json:"nodes"`
-		Partitions    []*PartitionMetadata `json:"partitions"`
-	}{}
-	metadata.NodeAddresses = make(map[int]string)
-	for id, node := range c.nodes {
-		if node.Status == Alive {
-			metadata.NodeAddresses[id] = node.HttpAddress
-		}
-	}
-	metadata.Partitions = c.partitions
-
-	ctx.JSON(http.StatusOK, metadata)
-}
-
-func (c *Controller) handleGetNodeMetadata(ctx *gin.Context) {
-	partitionID, err := strconv.Atoi(ctx.Param("partitionID"))
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
-		return
-	}
-
-	metadata := struct {
-		Addresses []string `json:"addresses"`
-	}{}
-	c.mu.Lock()
-	metadata.Addresses = make([]string, len(c.partitions[partitionID].Replicas))
-	for i, replica := range c.partitions[partitionID].Replicas {
-		if c.nodes[replica].Status == Alive {
-			metadata.Addresses[i] = c.nodes[replica].TcpAddress
-		}
-	}
-	c.mu.Unlock()
-
-	ctx.JSON(http.StatusOK, metadata)
-}
-
-func (c *Controller) handleHeartbeat(ctx *gin.Context) {
-	nodeID, err := strconv.Atoi(ctx.PostForm("NodeID"))
-	if err != nil {
-		return
-	}
-
-	c.mu.Lock()
-	if c.nodes[nodeID].Status == Dead {
-		log.Printf("controller::handleHeartbeat: Node %d revived\n", nodeID)
-		go c.reviveNode(nodeID)
-	}
-	c.nodes[nodeID].lastSeen = time.Now()
-	c.mu.Unlock()
-	ctx.Status(http.StatusOK)
 }
 
 func (c *Controller) handleRegisterNode(ctx *gin.Context) {
@@ -97,19 +36,36 @@ func (c *Controller) handleRegisterNode(ctx *gin.Context) {
 
 func (c *Controller) handleRemoveNode(ctx *gin.Context) {
 	nodeID, err := strconv.Atoi(ctx.PostForm("NodeID"))
+	nodeKey := fmt.Sprintf("node-%d", nodeID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid node ID"})
 		return
 	}
 
-	c.mu.Lock()
-	if _, exists := c.nodes[nodeID]; !exists {
-		c.mu.Unlock()
+	// Check if node exists using etcd
+	resp, err := c.etcdClient.Get(ctx, nodeKey)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check node status"})
+		return
+	}
+	if len(resp.Kvs) == 0 {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
 		return
 	}
-	c.nodes[nodeID].Status = Dead
-	c.mu.Unlock()
+
+	// Mark node as Dead in etcd
+	var node NodeMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse node data"})
+		return
+	}
+	node.Status = Dead
+	updatedNode, _ := json.Marshal(node)
+	_, err = c.etcdClient.Put(ctx, nodeKey, string(updatedNode))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update node status"})
+		return
+	}
 
 	c.handleFailover(nodeID)
 
@@ -133,21 +89,32 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 		return
 	}
 
-	c.mu.Lock()
-	if req.PartitionID < 0 || req.PartitionID >= len(c.partitions) {
-		c.mu.Unlock()
+	partitionKey := fmt.Sprintf("partition-%d", req.PartitionID)
+
+	// Get partition from etcd
+	resp, err := c.etcdClient.Get(ctx, partitionKey)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get partition"})
+		return
+	}
+	if len(resp.Kvs) == 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
 		return
 	}
 
-	if c.partitions[req.PartitionID].Leader == req.NodeID {
-		c.mu.Unlock()
+	var partition PartitionMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &partition); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse partition data"})
+		return
+	}
+
+	// Check if already leader
+	if partition.Leader == req.NodeID {
 		ctx.JSON(http.StatusOK, gin.H{"message": "Node is already the leader"})
 		return
 	}
 
-	// Check if the new leader is already a replica, if not error
-	partition := c.partitions[req.PartitionID]
+	// Check if node is a replica
 	exists := false
 	for _, replica := range partition.Replicas {
 		if replica == req.NodeID {
@@ -156,13 +123,11 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 		}
 	}
 	if !exists {
-		c.mu.Unlock()
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Node is not a replica of the partition"})
 		return
 	}
-	c.mu.Unlock()
 
-	err := c.changeLeader(req.PartitionID, req.NodeID)
+	err = c.changeLeader(req.PartitionID, req.NodeID)
 	if err != nil {
 		log.Printf("controller::handleSetLeader: Failed to set leader for partition %d: %v\n", req.PartitionID, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set leader"})
@@ -188,19 +153,26 @@ func (c *Controller) handleMoveReplica(ctx *gin.Context) {
 		return
 	}
 
-	c.mu.RLock()
-	if req.PartitionID < 0 || req.PartitionID >= len(c.partitions) {
-		c.mu.RUnlock()
+	partitionKey := fmt.Sprintf("partition-%d", req.PartitionID)
+
+	resp, err := c.etcdClient.Get(ctx, partitionKey)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get partition"})
+		return
+	}
+	if len(resp.Kvs) == 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid partition ID"})
 		return
 	}
 
-	partition := c.partitions[req.PartitionID]
+	var partition PartitionMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &partition); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse partition data"})
+		return
+	}
 
-	isLeader := false
-	if partition.Leader == req.From {
-		isLeader = true
-	} else {
+	isLeader := partition.Leader == req.From
+	if !isLeader {
 		exists := false
 		for _, replica := range partition.Replicas {
 			if replica == req.From {
@@ -209,15 +181,13 @@ func (c *Controller) handleMoveReplica(ctx *gin.Context) {
 			}
 		}
 		if !exists {
-			c.mu.RUnlock()
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Replica not found in partition"})
 			return
 		}
 	}
-	c.mu.RUnlock()
 
 	log.Printf("controller::handleMoveReplica: Moving replica from node %d to node %d for partition %d\n", req.From, req.To, req.PartitionID)
-	c.replicate(req.PartitionID, req.To)
+	c.replicate(partition, req.To)
 	if isLeader {
 		err := c.changeLeader(req.PartitionID, req.To)
 		if err != nil {
