@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/controller"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
 )
@@ -196,32 +197,58 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), REQUEST_TIMEOUT)
 	defer cancel()
 
-	url := fmt.Sprintf("http://controller:8080/node-metadata/%d", partitionId)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Get partition metadata from etcd
+	partitionKey := fmt.Sprintf("partitions/%d", partitionId)
+	partitionResp, err := n.etcdClient.Get(ctx, partitionKey)
 	if err != nil {
-		log.Printf("[node.getNodesContainingPartition] failed to connect to controller: %v", err)
+		log.Printf("[node.getNodesContainingPartition] failed to get partition %d from etcd: %v", partitionId, err)
 		return nil, err
 	}
 
-	resp, err := n.httpClient.Do(req)
-	if err != nil {
-		log.Printf("[node.getNodesContainingPartition] failed to do http request: %v", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("[node.getNodesContainingPartition] failed to do htpp request: %v", err)
-		return nil, fmt.Errorf("failed to fetch metadata: status %d", resp.StatusCode)
+	if len(partitionResp.Kvs) == 0 {
+		log.Printf("[node.getNodesContainingPartition] partition %d not found in etcd", partitionId)
+		return nil, fmt.Errorf("partition %d not found", partitionId)
 	}
 
-	metadata := struct {
-		Addresses []string `json:"addresses"`
-	}{}
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		log.Printf("[node.getNodesContainingPartition] failed to decode response: %v", err)
+	var partition controller.PartitionMetadata
+	if err := json.Unmarshal(partitionResp.Kvs[0].Value, &partition); err != nil {
+		log.Printf("[node.getNodesContainingPartition] failed to unmarshal partition data: %v", err)
 		return nil, err
 	}
 
-	return metadata.Addresses, nil
+	nodeIDs := make([]int, 0)
+	nodeIDs = append(nodeIDs, partition.Replicas...)
+
+	// Get node addresses from etcd
+	var addresses []string
+	for _, nodeID := range nodeIDs {
+		nodeKey := fmt.Sprintf("nodes/%d", nodeID)
+		nodeResp, err := n.etcdClient.Get(ctx, nodeKey)
+		if err != nil {
+			log.Printf("[node.getNodesContainingPartition] failed to get node %d from etcd: %v", nodeID, err)
+			continue
+		}
+
+		if len(nodeResp.Kvs) == 0 {
+			log.Printf("[node.getNodesContainingPartition] node %d not found in etcd", nodeID)
+			continue
+		}
+
+		var node controller.NodeMetadata
+		if err := json.Unmarshal(nodeResp.Kvs[0].Value, &node); err != nil {
+			log.Printf("[node.getNodesContainingPartition] failed to unmarshal node %d data: %v", nodeID, err)
+			continue
+		}
+
+		if node.Status == controller.Alive {
+			tcpAddress := node.TcpAddress
+			if tcpAddress == "" {
+				tcpAddress = fmt.Sprintf("node-%d:9000", nodeID)
+			}
+			addresses = append(addresses, tcpAddress)
+		}
+	}
+
+	log.Printf("[node.getNodesContainingPartition] found %d addresses for partition %d: %v", len(addresses), partitionId, addresses)
+	return addresses, nil
 }
