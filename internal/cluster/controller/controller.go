@@ -290,26 +290,26 @@ func (c *Controller) Start(addr string) {
 		ch := c.etcdClient.Watch(context.Background(), "nodes/active/", clientv3.WithPrefix())
 		for resp := range ch {
 			for _, event := range resp.Events {
+				nodeID, err := strconv.Atoi(string(event.Kv.Key)[len("nodes/active/"):])
+				if err != nil {
+					log.Printf("controller::Start: Failed to parse node ID: %v", err)
+					continue
+				}
+
+				resp, err := c.etcdClient.Get(context.Background(),
+					fmt.Sprintf("nodes/%d", nodeID))
+				if err != nil || len(resp.Kvs) == 0 {
+					log.Printf("Failed to get node %d info: %v", nodeID, err)
+					continue
+				}
+
+				var node NodeMetadata
+				if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
+					log.Printf("Invalid node data: %v", err)
+					continue
+				}
+
 				if event.Type == clientv3.EventTypeDelete {
-					nodeID, err := strconv.Atoi(string(event.Kv.Key)[len("nodes/active/"):])
-					if err != nil {
-						log.Printf("controller::Start: Failed to parse node ID: %v", err)
-						continue
-					}
-
-					resp, err := c.etcdClient.Get(context.Background(),
-						fmt.Sprintf("nodes/%d", nodeID))
-					if err != nil || len(resp.Kvs) == 0 {
-						log.Printf("Failed to get node %d info: %v", nodeID, err)
-						return
-					}
-
-					var node NodeMetadata
-					if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
-						log.Printf("Invalid node data: %v", err)
-						return
-					}
-
 					nodeKey := fmt.Sprintf("nodes/%d", nodeID)
 
 					if node.Status == Alive {
@@ -319,7 +319,7 @@ func (c *Controller) Start(addr string) {
 						updatedNode, err := json.Marshal(node)
 						if err != nil {
 							log.Printf("controller::monitorHeartbeat: Failed to marshal node %d data: %v\n", node.ID, err)
-							return
+							continue
 						}
 
 						// Use transaction to ensure leadership and atomic update
@@ -334,35 +334,37 @@ func (c *Controller) Start(addr string) {
 
 						if err != nil {
 							log.Printf("controller::monitorHeartbeat: Failed to update node %d status in etcd: %v\n", node.ID, err)
-							return
+							continue
 						}
 
 						if !txnResp.Succeeded {
 							log.Printf("controller::monitorHeartbeat: Not leader, cannot mark node %d as dead", node.ID)
-							return
+							continue
 						}
 
 						go c.handleFailover(node.ID)
 					}
+				} else if event.Type == clientv3.EventTypePut {
+					if node.Status == Dead {
+						log.Printf("controller::monitorHeartbeat: Node %d is back online", node.ID)
+						txnResp, err := c.etcdClient.Txn(context.Background()).If(
+							clientv3.Compare(clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+						).Then(
+							clientv3.OpGet("dummy_key"),
+						).Commit()
 
-					/*txnResp, err := c.etcdClient.Txn(context.Background()).
-						If(clientv3.Compare(
-							clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
-						).
-						Then(clientv3.OpGet("dummy_key")).
-						Commit()
+						if err != nil {
+							log.Printf("controller::Start: Leadership verification failed for node %d revival: %v", nodeID, err)
+							continue
+						}
 
-					if err != nil {
-						log.Printf("controller::Start: Leadership verification failed: %v", err)
-						continue
+						if txnResp.Succeeded {
+							log.Printf("controller::Start: Leader processing revival for node %d", nodeID)
+							go c.reviveNode(nodeID)
+						} else {
+							log.Printf("controller::Start: Not leader anymore, ignoring node %d revival", nodeID)
+						}
 					}
-
-					if txnResp.Succeeded {
-						log.Printf("controller::Start: Leader processing failover for node %d", nodeID)
-						go c.handleFailover(nodeID)
-					} else {
-						log.Printf("controller::Start: Not leader anymore, ignoring node %d failover", nodeID)
-					}*/
 				}
 			}
 		}
