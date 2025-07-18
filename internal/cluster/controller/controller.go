@@ -54,22 +54,79 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 	}
 	election := concurrency.NewElection(session, "controller/leader")
 
-	// Read configuration from environment variables with sensible defaults
-	partitionCount := 3 // default value
-	if envPartitions := os.Getenv("PARTITION_COUNT"); envPartitions != "" {
-		if parsed, err := strconv.Atoi(envPartitions); err == nil && parsed > 0 {
-			partitionCount = parsed
-		}
-	}
-	log.Printf("controller::NewController: partition count is %d", partitionCount)
+	// Try to read configuration from etcd first
+	var partitionCount int
+	var replicationFactor int
 
-	replicationFactor := 2 // default value
-	if envReplication := os.Getenv("REPLICATION_FACTOR"); envReplication != "" {
-		if parsed, err := strconv.Atoi(envReplication); err == nil && parsed > 0 {
-			replicationFactor = parsed
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Check for partition count in etcd
+	getResp, err := cli.Get(ctx, "config/partition_count")
+	if err != nil {
+		log.Printf("controller::NewController: failed to get partition count from etcd: %v", err)
+	}
+
+	if len(getResp.Kvs) > 0 {
+		partitionCount, err = strconv.Atoi(string(getResp.Kvs[0].Value))
+		if err != nil {
+			log.Printf("controller::NewController: failed to parse partition count from etcd: %v", err)
+		} else {
+			log.Printf("controller::NewController: partition count from etcd: %d", partitionCount)
 		}
 	}
-	log.Printf("controller::NewController: replication factor is %d", replicationFactor)
+
+	// Check for replication factor in etcd
+	getResp, err = cli.Get(ctx, "config/replication_factor")
+	if err != nil {
+		log.Printf("controller::NewController: failed to get replication factor from etcd: %v", err)
+	}
+
+	if len(getResp.Kvs) > 0 {
+		replicationFactor, err = strconv.Atoi(string(getResp.Kvs[0].Value))
+		if err != nil {
+			log.Printf("controller::NewController: failed to parse replication factor from etcd: %v", err)
+		} else {
+			log.Printf("controller::NewController: replication factor from etcd: %d", replicationFactor)
+		}
+	}
+
+	// If not found in etcd, use environment variables and store them
+	if partitionCount == 0 {
+		partitionCount = 3 // default value
+		if envPartitions := os.Getenv("PARTITION_COUNT"); envPartitions != "" {
+			if parsed, err := strconv.Atoi(envPartitions); err == nil && parsed > 0 {
+				partitionCount = parsed
+			}
+		}
+		log.Printf("controller::NewController: using partition count from env: %d", partitionCount)
+
+		// Store in etcd for other controllers
+		_, err = cli.Put(ctx, "config/partition_count", strconv.Itoa(partitionCount))
+		if err != nil {
+			log.Printf("controller::NewController: failed to store partition count in etcd: %v", err)
+		} else {
+			log.Printf("controller::NewController: stored partition count in etcd: %d", partitionCount)
+		}
+	}
+
+	if replicationFactor == 0 {
+		replicationFactor = 2 // default value
+		if envReplication := os.Getenv("REPLICATION_FACTOR"); envReplication != "" {
+			if parsed, err := strconv.Atoi(envReplication); err == nil && parsed > 0 {
+				replicationFactor = parsed
+			}
+		}
+		log.Printf("controller::NewController: using replication factor from env: %d", replicationFactor)
+
+		// Store in etcd for other controllers
+		_, err = cli.Put(ctx, "config/replication_factor", strconv.Itoa(replicationFactor))
+		if err != nil {
+			log.Printf("controller::NewController: failed to store replication factor in etcd: %v", err)
+		} else {
+			log.Printf("controller::NewController: stored replication factor in etcd: %d", replicationFactor)
+		}
+	}
 
 	c := &Controller{
 		id:                id,
