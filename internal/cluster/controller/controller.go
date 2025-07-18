@@ -74,6 +74,7 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 	} else {
 		partitionCount = 1
 	}
+	log.Printf("controller::NewController: partition count is %d", partitionCount)
 
 	var replicationFactor int
 	getResp, err = cli.Get(ctx, "factor/replication")
@@ -88,12 +89,14 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 	} else {
 		replicationFactor = 1
 	}
+	log.Printf("controller::NewController: replication factor is %d", replicationFactor)
 
 	getResp, err = cli.Get(context.Background(), "partitions/", clientv3.WithPrefix(), clientv3.WithCountOnly())
 	if err != nil {
 		log.Fatalf("failed to check existing partitions: %v", err)
 	}
 	if getResp.Count == 0 {
+		log.Printf("controller::NewController: initializing partitions in etcd")
 		txnOps := make([]clientv3.Op, 0, partitionCount)
 		for i := 0; i < partitionCount; i++ {
 			partition := &PartitionMetadata{
@@ -125,6 +128,7 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 		if !txnResp.Succeeded {
 			log.Printf("partitions already exist")
 		}
+		log.Printf("partition initialization completed")
 	}
 
 	c := &Controller{
@@ -168,8 +172,7 @@ func (c *Controller) RegisterNode(nodeID int) error {
 		return errors.New("failed to marshal node metadata")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
 	key := fmt.Sprintf("nodes/%d", nodeID)
 	txnResp, err := c.etcdClient.Txn(ctx).If(
@@ -271,24 +274,55 @@ func (c *Controller) Start(addr string) {
 
 	// Check if we need initialization
 
-	go c.monitorHeartbeat()
 	go func() {
 		ch := c.etcdClient.Watch(context.Background(), "nodes/active/", clientv3.WithPrefix())
 		for resp := range ch {
 			for _, event := range resp.Events {
 				if event.Type == clientv3.EventTypeDelete {
-					nodeId, err := strconv.Atoi(string(event.Kv.Key)[len("nodes/active/"):])
+					nodeID, err := strconv.Atoi(string(event.Kv.Key)[len("nodes/active/"):])
 					if err != nil {
 						log.Printf("controller::Start: Failed to parse node ID: %v", err)
 						continue
 					}
 
-					txnResp, err := c.etcdClient.Txn(context.Background()).
+					resp, err := c.etcdClient.Get(context.Background(),
+						fmt.Sprintf("nodes/%d", nodeID))
+					if err != nil || len(resp.Kvs) == 0 {
+						log.Printf("Failed to get node %d info: %v", nodeID, err)
+						return
+					}
+
+					var node NodeMetadata
+					if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
+						log.Printf("Invalid node data: %v", err)
+						return
+					}
+
+					nodeKey := fmt.Sprintf("nodes/%d", nodeID)
+
+					if node.Status == Alive {
+						log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
+
+						node.Status = Dead
+						updatedNode, err := json.Marshal(node)
+						if err != nil {
+							log.Printf("controller::monitorHeartbeat: Failed to marshal node %d data: %v\n", node.ID, err)
+							return
+						}
+
+						_, err = c.etcdClient.Put(context.Background(), nodeKey, string(updatedNode))
+						if err != nil {
+							log.Printf("controller::monitorHeartbeat: Failed to update node %d status in etcd: %v\n", node.ID, err)
+							return
+						}
+
+						go c.handleFailover(node.ID)
+					}
+
+					/*txnResp, err := c.etcdClient.Txn(context.Background()).
 						If(clientv3.Compare(
-							clientv3.CreateRevision(c.election.Key()),
-							"=",
-							c.election.Rev(),
-						)).
+							clientv3.CreateRevision(c.election.Key()), "=", c.election.Rev()),
+						).
 						Then(clientv3.OpGet("dummy_key")).
 						Commit()
 
@@ -298,11 +332,11 @@ func (c *Controller) Start(addr string) {
 					}
 
 					if txnResp.Succeeded {
-						log.Printf("controller::Start: Leader processing failover for node %d", nodeId)
-						go c.handleFailover(nodeId)
+						log.Printf("controller::Start: Leader processing failover for node %d", nodeID)
+						go c.handleFailover(nodeID)
 					} else {
-						log.Printf("controller::Start: Not leader anymore, ignoring node %d failover", nodeId)
-					}
+						log.Printf("controller::Start: Not leader anymore, ignoring node %d failover", nodeID)
+					}*/
 				}
 			}
 		}
@@ -316,7 +350,7 @@ func (c *Controller) Start(addr string) {
 
 	go func() {
 		if err := c.RegisterNode(1); err != nil {
-			log.Fatalf("controller::Start: Failed to create initial node: %v", err)
+			log.Printf("controller::Start: Failed to create initial node: %v", err)
 		}
 	}()
 
@@ -389,6 +423,8 @@ func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 				}
 			}
 
+			log.Printf("controller::replicatePartitions: Attempting to assign partition %d to node %d", partitionID, nodeID)
+
 			if err := c.replicate(partition, nodeID); err != nil {
 				log.Printf("Replication attempt %d failed for partition %d: %v",
 					i+1, partitionID, err)
@@ -455,6 +491,8 @@ func (c *Controller) updateNodePartitions(nodeID, partitionID int) string {
 }
 
 func (c *Controller) replicate(partition PartitionMetadata, nodeID int) error {
+	log.Printf("partition %d leader: %d, replicas: %v", partition.PartitionID, partition.Leader, partition.Replicas)
+
 	var addr string
 	if partition.Leader == -1 {
 		addr = fmt.Sprintf("%s/add-partition/%d", c.nodes[nodeID].HttpAddress, partition.PartitionID)
@@ -495,7 +533,7 @@ func (c *Controller) monitorHeartbeat() {
 					log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
 					node.Status = Dead
 
-					// go c.handleFailover(node.ID)
+					go c.handleFailover(node.ID)
 				}
 			}
 		}
@@ -799,71 +837,71 @@ func (c *Controller) removePartitionReplica(partitionID, nodeID int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-    partitionKey := fmt.Sprintf("partitions/%d", partitionID)
+	partitionKey := fmt.Sprintf("partitions/%d", partitionID)
 
-    getResp, err := c.etcdClient.Get(ctx, partitionKey)
-    if err != nil {
-        return fmt.Errorf("failed to get partition metadata: %v", err)
-    }
-    if len(getResp.Kvs) == 0 {
-        return fmt.Errorf("partition %d not found", partitionID)
-    }
+	getResp, err := c.etcdClient.Get(ctx, partitionKey)
+	if err != nil {
+		return fmt.Errorf("failed to get partition metadata: %v", err)
+	}
+	if len(getResp.Kvs) == 0 {
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
 
-    var partition PartitionMetadata
-    if err := json.Unmarshal(getResp.Kvs[0].Value, &partition); err != nil {
-        return fmt.Errorf("failed to unmarshal partition metadata: %v", err)
-    }
+	var partition PartitionMetadata
+	if err := json.Unmarshal(getResp.Kvs[0].Value, &partition); err != nil {
+		return fmt.Errorf("failed to unmarshal partition metadata: %v", err)
+	}
 
-    replicasUpdated := false
-    newReplicas := make([]int, 0, len(partition.Replicas))
-    for _, replica := range partition.Replicas {
-        if replica != nodeID {
-            newReplicas = append(newReplicas, replica)
-        } else {
-            replicasUpdated = true
-        }
-    }
+	replicasUpdated := false
+	newReplicas := make([]int, 0, len(partition.Replicas))
+	for _, replica := range partition.Replicas {
+		if replica != nodeID {
+			newReplicas = append(newReplicas, replica)
+		} else {
+			replicasUpdated = true
+		}
+	}
 
-    if replicasUpdated {
-        partition.Replicas = newReplicas
-        updatedPartition, err := json.Marshal(partition)
-        if err != nil {
-            return fmt.Errorf("failed to marshal updated partition metadata: %v", err)
-        }
+	if replicasUpdated {
+		partition.Replicas = newReplicas
+		updatedPartition, err := json.Marshal(partition)
+		if err != nil {
+			return fmt.Errorf("failed to marshal updated partition metadata: %v", err)
+		}
 
-        _, err = c.etcdClient.Put(ctx, partitionKey, string(updatedPartition))
-        if err != nil {
-            return fmt.Errorf("failed to update partition metadata: %v", err)
-        }
+		_, err = c.etcdClient.Put(ctx, partitionKey, string(updatedPartition))
+		if err != nil {
+			return fmt.Errorf("failed to update partition metadata: %v", err)
+		}
 
-        log.Printf("controller::removePartitionReplica: Removed node %d from replicas of partition %d\n", nodeID, partitionID)
-        return nil
-    }
+		log.Printf("controller::removePartitionReplica: Removed node %d from replicas of partition %d\n", nodeID, partitionID)
+		return nil
+	}
 
-    nodeKey := fmt.Sprintf("nodes/%d", nodeID)
-    nodeResp, err := c.etcdClient.Get(ctx, nodeKey)
-    if err != nil {
-        return fmt.Errorf("failed to get node metadata: %v", err)
-    }
-    if len(nodeResp.Kvs) == 0 {
-        return fmt.Errorf("node %d not found", nodeID)
-    }
+	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
+	nodeResp, err := c.etcdClient.Get(ctx, nodeKey)
+	if err != nil {
+		return fmt.Errorf("failed to get node metadata: %v", err)
+	}
+	if len(nodeResp.Kvs) == 0 {
+		return fmt.Errorf("node %d not found", nodeID)
+	}
 
-    var node NodeMetadata
-    if err := json.Unmarshal(nodeResp.Kvs[0].Value, &node); err != nil {
-        return fmt.Errorf("failed to unmarshal node metadata: %v", err)
-    }
+	var node NodeMetadata
+	if err := json.Unmarshal(nodeResp.Kvs[0].Value, &node); err != nil {
+		return fmt.Errorf("failed to unmarshal node metadata: %v", err)
+	}
 
-    addr := fmt.Sprintf("%s/delete-partition/%d", node.HttpAddress, partitionID)
-    resp, err := c.doNodeRequest("POST", addr)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-    if resp.StatusCode != http.StatusOK {
-        return errors.New("resp status not OK: " + resp.Status)
-    }
+	addr := fmt.Sprintf("%s/delete-partition/%d", node.HttpAddress, partitionID)
+	resp, err := c.doNodeRequest("POST", addr)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.New("resp status not OK: " + resp.Status)
+	}
 
-    log.Printf("controller::removePartitionReplica: Node %d removed from partition %d successfully\n", nodeID, partitionID)
-    return nil
+	log.Printf("controller::removePartitionReplica: Node %d removed from partition %d successfully\n", nodeID, partitionID)
+	return nil
 }

@@ -22,6 +22,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("controller::main: failed to get 'CONTROLLER-ID' env variable: %v", err)
 	}
-	controller := controller.NewController(id, dockerClient, 3, 2, "ct_hw4a_temp", "ct_hw4a-node:latest", etcdEndpoints)
+	controller := controller.NewController(id, dockerClient, "ct_hw4a_temp", "ct_hw4a-node:latest", etcdEndpoints)
 	controller.Start(":8080")
 }
