@@ -144,12 +144,11 @@ services:
 
 
   loadbalancer:
-    container_name: loadbalancer
     build:
       context: .
       dockerfile: ./cmd/loadbalancer/Dockerfile
     ports:
-      - "9001:9001"
+      - "9001-9002:9001"
     networks:
       - temp
     depends_on:
@@ -159,6 +158,8 @@ services:
         condition: service_started
       etcd-3:
         condition: service_started
+    deploy:
+      replicas: 2
 
   node:
     image: ct_hw4a-node:latest
