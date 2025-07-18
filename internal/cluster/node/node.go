@@ -67,7 +67,7 @@ func (n *Node) Start() {
 	defer n.etcdClient.Close()
 
 	log.Println("[node.Start] Attempting to create etcd session...")
-	session, err := concurrency.NewSession(n.etcdClient, concurrency.WithTTL(5))
+	session, err := concurrency.NewSession(n.etcdClient, concurrency.WithTTL(HEARTBEAT_TIMER))
 	if err != nil {
 		log.Fatalf("[node.Start] ETCD SESSION FAILED: %v", err)
 	}
@@ -77,7 +77,6 @@ func (n *Node) Start() {
 	n.etcdClient.Put(ctx, fmt.Sprintf("nodes/active/%d", n.Id), "baghojenanash", clientv3.WithLease(session.Lease()))
 	defer cancel()
 
-	go n.startHeartbeat(time.Duration(HEARTBEAT_TIMER * time.Second))
 	go n.tcpListener(n.nodeConnectionHandler)
 
 	n.setupRoutes()
@@ -283,18 +282,6 @@ func (n *Node) replicateToFollower(address string, msg Message) error {
 
 	log.Printf("[node.replicateToFollower] failed to replicate to follower at %s after %d retries", address, maxRetries)
 	return fmt.Errorf("failed to replicate to follower at %s after %d retries", address, maxRetries)
-}
-
-func (n *Node) startHeartbeat(interval time.Duration) {
-	go func() {
-		for {
-			err := n.sendHeartbeat()
-			if err != nil {
-				log.Printf("[node.startHeartbeat] failed to send heartbeat: %v", err)
-			}
-			time.Sleep(interval)
-		}
-	}()
 }
 
 func (n *Node) sendSnapshotToNode(partitionId int, address string) error {

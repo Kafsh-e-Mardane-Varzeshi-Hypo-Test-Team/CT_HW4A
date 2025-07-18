@@ -524,25 +524,6 @@ func (c *Controller) doNodeRequest(method, addr string) (*http.Response, error) 
 	return c.httpClient.Do(req)
 }
 
-func (c *Controller) monitorHeartbeat() {
-	for {
-		c.mu.Lock()
-		for _, node := range c.nodes {
-			if time.Since(node.lastSeen) > 3*time.Second {
-				if node.Status == Alive {
-					log.Printf("controller::monitorHeartbeat: Node %d is not responding\n", node.ID)
-					node.Status = Dead
-
-					go c.handleFailover(node.ID)
-				}
-			}
-		}
-		c.mu.Unlock()
-
-		time.Sleep(2 * time.Second)
-	}
-}
-
 func (c *Controller) handleFailover(nodeID int) {
 	log.Printf("Starting failover for node %d", nodeID)
 
@@ -568,7 +549,22 @@ func (c *Controller) handleFailover(nodeID int) {
 		return
 	}
 
-	for _, partitionID := range node.partitions {
+	partitionsKey := fmt.Sprintf("nodes/%d/partitions", nodeID)
+	resp, err = c.etcdClient.Get(context.Background(), partitionsKey)
+	if err != nil {
+		log.Printf("failed to get node partitions: %v", err)
+		return
+	}
+
+	var partitions []int
+	if len(resp.Kvs) > 0 {
+		if err := json.Unmarshal(resp.Kvs[0].Value, &partitions); err != nil {
+			log.Printf("failed to unmarshal node partitions: %v", err)
+			return
+		}
+	}
+
+	for _, partitionID := range partitions {
 		if err := c.handlePartitionFailover(partitionID, nodeID); err != nil {
 			log.Printf("Failed to handle partition %d: %v", partitionID, err)
 			continue

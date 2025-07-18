@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"time"
 )
 
 type NodeStatus string
@@ -19,8 +18,6 @@ type NodeMetadata struct {
 	HttpAddress string     `json:"http"`
 	TcpAddress  string     `json:"tcp"`
 	Status      NodeStatus `json:"status"`
-	lastSeen    time.Time
-	partitions  []int
 }
 
 type PartitionMetadata struct {
