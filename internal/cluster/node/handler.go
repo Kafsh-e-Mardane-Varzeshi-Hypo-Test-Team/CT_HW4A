@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW4A/internal/cluster/replica"
@@ -225,20 +224,4 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 	}
 
 	return metadata.Addresses, nil
-}
-
-func (n *Node) sendHeartbeat() error {
-	data := url.Values{"NodeID": {strconv.Itoa(n.Id)}}
-
-	resp, err := http.PostForm("http://controller:8080/node-heartbeat", data)
-	if err != nil {
-		return fmt.Errorf("[node.sendHeartbeat] failed to send heartbeat: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("[node.sendHeartbeat] controller returned non-OK status: %v", resp.Status)
-	}
-
-	return nil
 }
