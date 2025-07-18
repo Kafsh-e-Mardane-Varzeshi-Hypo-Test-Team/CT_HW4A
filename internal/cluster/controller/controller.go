@@ -54,78 +54,22 @@ func NewController(id int, dockerClient *docker.DockerClient, networkName, nodeI
 	}
 	election := concurrency.NewElection(session, "controller/leader")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	var partitionCount int
-	getResp, err := cli.Get(ctx, "factor/partitions")
-	if err != nil {
-		log.Fatalf("controller::NewController: failed to get partition counts, %v", err)
-	}
-	if len(getResp.Kvs) > 0 {
-		partitionCount, err = strconv.Atoi(string(getResp.Kvs[0].Value))
-		if err != nil {
-			log.Fatalln("controller::NewController: failed to parse partition counts, %v", err)
+	// Read configuration from environment variables with sensible defaults
+	partitionCount := 3 // default value
+	if envPartitions := os.Getenv("PARTITION_COUNT"); envPartitions != "" {
+		if parsed, err := strconv.Atoi(envPartitions); err == nil && parsed > 0 {
+			partitionCount = parsed
 		}
-	} else {
-		partitionCount = 1
 	}
 	log.Printf("controller::NewController: partition count is %d", partitionCount)
 
-	var replicationFactor int
-	getResp, err = cli.Get(ctx, "factor/replication")
-	if err != nil {
-		log.Fatalf("controller::NewController: failed to get replication factor, %v", err)
-	}
-	if len(getResp.Kvs) > 0 {
-		replicationFactor, err = strconv.Atoi(string(getResp.Kvs[0].Value))
-		if err != nil {
-			log.Fatalln("controller::NewController: failed to parse replication factor, %v", err)
+	replicationFactor := 2 // default value
+	if envReplication := os.Getenv("REPLICATION_FACTOR"); envReplication != "" {
+		if parsed, err := strconv.Atoi(envReplication); err == nil && parsed > 0 {
+			replicationFactor = parsed
 		}
-	} else {
-		replicationFactor = 1
 	}
 	log.Printf("controller::NewController: replication factor is %d", replicationFactor)
-
-	getResp, err = cli.Get(context.Background(), "partitions/", clientv3.WithPrefix(), clientv3.WithCountOnly())
-	if err != nil {
-		log.Fatalf("failed to check existing partitions: %v", err)
-	}
-	if getResp.Count == 0 {
-		log.Printf("controller::NewController: initializing partitions in etcd")
-		txnOps := make([]clientv3.Op, 0, partitionCount)
-		for i := 0; i < partitionCount; i++ {
-			partition := &PartitionMetadata{
-				PartitionID: i,
-				Leader:      -1,
-				Replicas:    []int{},
-			}
-			data, _ := json.Marshal(partition)
-			txnOps = append(txnOps,
-				clientv3.OpPut(
-					fmt.Sprintf("partitions/%d", i),
-					string(data),
-				))
-		}
-
-		txnResp, err := cli.Txn(context.Background()).
-			If(clientv3.Compare(
-				clientv3.Version("partitions/0"),
-				"=",
-				0,
-			)).
-			Then(txnOps...).
-			Commit()
-
-		if err != nil {
-			log.Printf("partition initialization failed: %v", err)
-		}
-
-		if !txnResp.Succeeded {
-			log.Printf("partitions already exist")
-		}
-		log.Printf("partition initialization completed")
-	}
 
 	c := &Controller{
 		id:                id,
@@ -283,7 +227,14 @@ func (c *Controller) Start(addr string) {
 	}
 	log.Printf("I'm the leader, controller-%d", c.id)
 
-	// Check if we need initialization
+	// Check if we need initialization by looking for existing nodes
+	getResp, err := c.etcdClient.Get(context.Background(), "nodes/", clientv3.WithPrefix(), clientv3.WithCountOnly())
+	if err != nil {
+		log.Printf("controller::Start: failed to check existing nodes: %v", err)
+	} else if getResp.Count == 0 {
+		log.Printf("controller::Start: No nodes exist, initializing partitions")
+		c.initializePartitions()
+	}
 
 	go c.watchNodeStatus()
 
@@ -301,6 +252,59 @@ func (c *Controller) Start(addr string) {
 
 	<-ctx.Done()
 	log.Printf("controller::Start: Shutting down gracefully...")
+}
+
+func (c *Controller) initializePartitions() {
+	log.Printf("controller::initializePartitions: Initializing %d partitions", c.partitionCount)
+
+	// Check if partitions already exist
+	getResp, err := c.etcdClient.Get(context.Background(), "partitions/", clientv3.WithPrefix(), clientv3.WithCountOnly())
+	if err != nil {
+		log.Printf("controller::initializePartitions: failed to check existing partitions: %v", err)
+		return
+	}
+
+	if getResp.Count > 0 {
+		log.Printf("controller::initializePartitions: Partitions already exist, skipping initialization")
+		return
+	}
+
+	// Initialize partitions
+	txnOps := make([]clientv3.Op, 0, c.partitionCount)
+	for i := 0; i < c.partitionCount; i++ {
+		partition := &PartitionMetadata{
+			PartitionID: i,
+			Leader:      -1,
+			Replicas:    []int{},
+		}
+		data, _ := json.Marshal(partition)
+		txnOps = append(txnOps,
+			clientv3.OpPut(
+				fmt.Sprintf("partitions/%d", i),
+				string(data),
+			))
+	}
+
+	txnResp, err := c.etcdClient.Txn(context.Background()).
+		If(clientv3.Compare(
+			clientv3.Version("partitions/0"),
+			"=",
+			0,
+		)).
+		Then(txnOps...).
+		Commit()
+
+	if err != nil {
+		log.Printf("controller::initializePartitions: partition initialization failed: %v", err)
+		return
+	}
+
+	if !txnResp.Succeeded {
+		log.Printf("controller::initializePartitions: partitions already exist")
+		return
+	}
+
+	log.Printf("controller::initializePartitions: Successfully initialized %d partitions", c.partitionCount)
 }
 
 func (c *Controller) makeNodeReady(node *NodeMetadata) {
@@ -451,8 +455,6 @@ func (c *Controller) updateNodePartitions(nodeID, partitionID int) string {
 }
 
 func (c *Controller) replicate(partition PartitionMetadata, nodeID int) error {
-	log.Printf("partition %d leader: %d, replicas: %v", partition.PartitionID, partition.Leader, partition.Replicas)
-
 	// Get node metadata from etcd
 	nodeKey := fmt.Sprintf("nodes/%d", nodeID)
 	nodeResp, err := c.etcdClient.Get(context.Background(), nodeKey)

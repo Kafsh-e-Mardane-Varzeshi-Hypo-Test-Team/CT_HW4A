@@ -62,11 +62,17 @@ services:
     networks:
       - temp
 
-  controller-1:
-    container_name: controller-1
+  controller:
+    image: ct_hw4a-controller:latest
     build:
       context: .
       dockerfile: ./cmd/controller/Dockerfile
+    profiles:
+      - build_only
+
+  controller-1:
+    container_name: controller-1
+    image: ct_hw4a-controller:latest
     ports:
       - "8080:8080"
     networks:
@@ -74,6 +80,8 @@ services:
     environment:
       - DOCKER_NETWORK=temp
       - CONTROLLER-ID=1
+      - PARTITION_COUNT=3
+      - REPLICATION_FACTOR=2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
@@ -88,9 +96,7 @@ services:
 
   controller-2:
     container_name: controller-2
-    build:
-      context: .
-      dockerfile: ./cmd/controller/Dockerfile
+    image: ct_hw4a-controller:latest
     ports:
       - "8081:8080"
     networks:
@@ -98,6 +104,8 @@ services:
     environment:
       - DOCKER_NETWORK=temp
       - CONTROLLER-ID=2
+      - PARTITION_COUNT=3
+      - REPLICATION_FACTOR=2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
@@ -112,9 +120,7 @@ services:
 
   controller-3:
     container_name: controller-3
-    build:
-      context: .
-      dockerfile: ./cmd/controller/Dockerfile
+    image: ct_hw4a-controller:latest
     ports:
       - "8082:8080"
     networks:
@@ -122,6 +128,8 @@ services:
     environment:
       - DOCKER_NETWORK=temp
       - CONTROLLER-ID=3
+      - PARTITION_COUNT=3
+      - REPLICATION_FACTOR=2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
