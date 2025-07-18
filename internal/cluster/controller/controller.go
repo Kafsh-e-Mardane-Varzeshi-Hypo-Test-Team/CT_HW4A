@@ -718,15 +718,42 @@ func (c *Controller) reviveNode(nodeID int) {
 }
 
 func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 
-	partition := c.partitions[partitionID]
+	partitionKey := fmt.Sprintf("partitions/%d", partitionID)
 
-	// notify the old leader to become follower
+	getResp, err := c.etcdClient.Get(ctx, partitionKey)
+	if err != nil {
+		return fmt.Errorf("failed to get partition metadata: %v", err)
+	}
+	if len(getResp.Kvs) == 0 {
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
+
+	var partition PartitionMetadata
+	if err := json.Unmarshal(getResp.Kvs[0].Value, &partition); err != nil {
+		return fmt.Errorf("failed to unmarshal partition metadata: %v", err)
+	}
+
 	oldLeaderID := partition.Leader
+
 	if oldLeaderID != -1 {
-		addr := fmt.Sprintf("%s/set-follower/%d", c.nodes[oldLeaderID].HttpAddress, partitionID)
+		nodeKey := fmt.Sprintf("nodes/%d", oldLeaderID)
+		nodeResp, err := c.etcdClient.Get(ctx, nodeKey)
+		if err != nil {
+			return fmt.Errorf("failed to get old leader metadata: %v", err)
+		}
+		if len(nodeResp.Kvs) == 0 {
+			return fmt.Errorf("old leader node %d not found", oldLeaderID)
+		}
+
+		var oldLeader NodeMetadata
+		if err := json.Unmarshal(nodeResp.Kvs[0].Value, &oldLeader); err != nil {
+			return fmt.Errorf("failed to unmarshal old leader metadata: %v", err)
+		}
+
+		addr := fmt.Sprintf("%s/set-follower/%d", oldLeader.HttpAddress, partitionID)
 		resp, err := c.doNodeRequest("POST", addr)
 		if err != nil {
 			log.Printf("controller::changeLeader: Failed to notify old leader %d for partition %d: %v\n", oldLeaderID, partitionID, err)
@@ -740,37 +767,31 @@ func (c *Controller) changeLeader(partitionID, newLeaderID int) error {
 		log.Printf("controller::changeLeader: Node %d is now a follower for partition %d\n", oldLeaderID, partitionID)
 	}
 
-	// notify the new leader to take over
-	addr := fmt.Sprintf("%s/set-leader/%d", c.nodes[newLeaderID].HttpAddress, partitionID)
-	resp, err := c.doNodeRequest("POST", addr)
-	if err != nil {
-		log.Printf("controller::changeLeader: Failed to notify new leader for partition %d: %v\n", partitionID, err)
-		return fmt.Errorf("failed to notify new leader")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("controller::changeLeader: Failed to set new leader for partition %d: %s\n", partitionID, resp.Status)
-		return fmt.Errorf("failed to set new leader for partition %d: %v", partitionID, resp.Status)
-	}
+	c.notifyNewLeader(newLeaderID, partitionID)
 
-	// remove new leader from replicas
-	for i, replica := range partition.Replicas {
-		if replica == newLeaderID {
-			partition.Replicas = append(partition.Replicas[:i], partition.Replicas[i+1:]...)
-			log.Printf("controller::changeLeader: Removed node %d from replicas of partition %d\n", newLeaderID, partitionID)
-			break
+	newReplicas := make([]int, 0, len(partition.Replicas))
+	for _, replica := range partition.Replicas {
+		if replica != newLeaderID {
+			newReplicas = append(newReplicas, replica)
 		}
 	}
-
-	// add old leader to replicas
 	if oldLeaderID != -1 && oldLeaderID != newLeaderID {
-		partition.Replicas = append(partition.Replicas, oldLeaderID)
-		log.Printf("controller::changeLeader: Added old leader %d to replicas of partition %d\n", oldLeaderID, partitionID)
+		newReplicas = append(newReplicas, oldLeaderID)
 	}
 
 	partition.Leader = newLeaderID
-	log.Printf("controller::changeLeader: Partition %d leader changed to node %d\n", partitionID, newLeaderID)
+	partition.Replicas = newReplicas
+	updatedPartition, err := json.Marshal(partition)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated partition metadata: %v", err)
+	}
 
+	_, err = c.etcdClient.Put(ctx, partitionKey, string(updatedPartition))
+	if err != nil {
+		return fmt.Errorf("failed to update partition metadata: %v", err)
+	}
+
+	log.Printf("controller::changeLeader: Partition %d leader changed to node %d\n", partitionID, newLeaderID)
 	return nil
 }
 

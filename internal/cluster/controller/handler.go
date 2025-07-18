@@ -162,7 +162,12 @@ func (c *Controller) handleSetLeader(ctx *gin.Context) {
 	}
 	c.mu.Unlock()
 
-	c.changeLeader(req.PartitionID, req.NodeID)
+	err := c.changeLeader(req.PartitionID, req.NodeID)
+	if err != nil {
+		log.Printf("controller::handleSetLeader: Failed to set leader for partition %d: %v\n", req.PartitionID, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set leader"})
+		return
+	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Leader set successfully"})
 	log.Printf("controller::handleSetLeader: Node %d is now the leader for partition %d\n", req.NodeID, req.PartitionID)
@@ -214,7 +219,12 @@ func (c *Controller) handleMoveReplica(ctx *gin.Context) {
 	log.Printf("controller::handleMoveReplica: Moving replica from node %d to node %d for partition %d\n", req.From, req.To, req.PartitionID)
 	c.replicate(req.PartitionID, req.To)
 	if isLeader {
-		c.changeLeader(req.PartitionID, req.To)
+		err := c.changeLeader(req.PartitionID, req.To)
+		if err != nil {
+			log.Printf("controller::handleMoveReplica: Failed to set leader for partition %d: %v\n", req.PartitionID, err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set leader"})
+			return
+		}
 		log.Printf("controller::handleMoveReplica: Node %d is now the leader for partition %d after moving replica\n", req.To, req.PartitionID)
 	}
 	c.removePartitionReplica(req.PartitionID, req.From)
